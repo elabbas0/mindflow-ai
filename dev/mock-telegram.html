@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MindFlow mock Telegram (local testing only)</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0e1621; color: #fff; margin: 0; }
+  #wrap { max-width: 560px; margin: 0 auto; padding: 16px; }
+  #log { display: flex; flex-direction: column; gap: 8px; min-height: 300px; margin-bottom: 12px; }
+  .me { align-self: flex-end; background: #2b5278; padding: 8px 12px; border-radius: 12px 12px 2px 12px; max-width: 80%; white-space: pre-wrap; }
+  .bot { align-self: flex-start; background: #182533; padding: 8px 12px; border-radius: 12px 12px 12px 2px; max-width: 80%; white-space: pre-wrap; }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .btns button { background: #2b5278; color: #fff; border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+  .btns button:disabled { opacity: 0.5; cursor: default; }
+  #row { display: flex; gap: 8px; }
+  #text { flex: 1; padding: 10px; border-radius: 8px; border: 0; }
+  button.action { background: #2b5278; color: #fff; border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; }
+  #bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; font-size: 13px; color: #9fb3c8; }
+  #api { flex: 1; padding: 6px; border-radius: 6px; border: 0; }
+  #status { font-size: 13px; color: #9fb3c8; min-height: 18px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h3>MindFlow mock Telegram <small style="color:#9fb3c8">local only</small></h3>
+  <div id="bar">
+    <span>API:</span>
+    <input id="api" value="http://127.0.0.1:3000" />
+    <button class="action" onclick="resetChat()">Reset</button>
+  </div>
+  <div id="status"></div>
+  <div id="log"></div>
+  <div id="row">
+    <input id="text" placeholder="Type a message, e.g. /start" onkeydown="if(event.key==='Enter')sendText()" />
+    <button class="action" onclick="sendText()">Send</button>
+  </div>
+</div>
+<script>
+const CHAT_ID = 12345;
+let updateId = Date.now();
+let messageId = 0;
+let rendered = 0;
+
+const api = () => document.getElementById('api').value.replace(/\/$/, '');
+const log = document.getElementById('log');
+const status = (t) => { document.getElementById('status').textContent = t; };
+
+function bubble(cls, text) {
+  const d = document.createElement('div');
+  d.className = cls;
+  d.textContent = text;
+  log.appendChild(d);
+  d.scrollIntoView();
+  return d;
+}
+
+async function postUpdate(payload) {
+  const res = await fetch(api() + '/api/telegram/webhook', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) status('webhook error: ' + res.status);
+}
+
+async function sendText() {
+  const input = document.getElementById('text');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  bubble('me', text);
+  await postUpdate({
+    update_id: ++updateId,
+    message: { message_id: ++messageId, chat: { id: CHAT_ID }, from: { id: CHAT_ID }, text },
+  });
+}
+
+async function press(data, btn) {
+  btn.disabled = true;
+  bubble('me', btn.textContent);
+  await postUpdate({
+    update_id: ++updateId,
+    callback_query: { id: 'cb' + Date.now(), data, message: { chat: { id: CHAT_ID } } },
+  });
+}
+
+async function poll() {
+  try {
+    const res = await fetch(api() + '/dev/outbox?chat_id=' + CHAT_ID);
+    if (!res.ok) { status('outbox error: run server with DEV_MODE=true. (' + res.status + ')'); return; }
+    status('');
+    const json = await res.json();
+    const fresh = json.messages.slice(rendered);
+    rendered = json.messages.length;
+    for (const m of fresh) {
+      const b = bubble('bot', m.text);
+      if (m.buttons && m.buttons.length) {
+        const row = document.createElement('div');
+        row.className = 'btns';
+        for (const line of m.buttons) {
+          for (const btn of line) {
+            const el = document.createElement('button');
+            el.textContent = btn.text;
+            el.onclick = () => press(btn.callback_data, el);
+            row.appendChild(el);
+          }
+        }
+        b.appendChild(row);
+      }
+    }
+  } catch (e) {
+    status('cannot reach API at ' + api() + ' — is the server running?');
+  }
+}
+
+async function resetChat() {
+  try { await fetch(api() + '/dev/reset', { method: 'POST' }); } catch (e) {}
+  log.innerHTML = '';
+  rendered = 0;
+  status('');
+}
+
+setInterval(poll, 1000);
+poll();
+</script>
+</body>
+</html>

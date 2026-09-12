@@ -31,6 +31,17 @@ npm run build && npm start
 Set the Telegram webhook to `POST https://<host>/api/telegram/webhook`
 with header `x-telegram-bot-api-secret-token: <TELEGRAM_WEBHOOK_SECRET>`.
 
+## Local testing (mock Telegram UI, no bot token needed)
+
+```sh
+$env:DEV_MODE='true'; $env:STORE='memory'; npm run dev
+```
+
+Then open `dev/mock-telegram.html` in a browser and chat: `/start`,
+a free-form message, and tap a category button. Bot replies are captured
+in-memory; inspect via `GET /dev/outbox?chat_id=12345`. These `/dev/*`
+routes only exist when `DEV_MODE=true` and never run in production.
+
 ## Hosting (Railway)
 
 The service deploys from the `backend` branch only (`railway.json` holds the

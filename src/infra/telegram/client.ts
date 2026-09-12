@@ -1,5 +1,11 @@
 import { env } from '../../config/env.js';
 import { NotConfiguredError } from '../../shared/errors.js';
+import { pushOutbox, type OutboxButton } from './outbox.js';
+
+export interface InlineButton {
+  text: string;
+  callback_data: string;
+}
 
 const API = 'https://api.telegram.org';
 
@@ -8,14 +14,32 @@ function requireToken(): string {
   return env.TELEGRAM_BOT_TOKEN;
 }
 
-export async function sendMessage(chatId: number, text: string): Promise<void> {
+export async function sendMessage(chatId: number, text: string, buttons: InlineButton[][] = []): Promise<void> {
+  if (env.DEV_MODE) {
+    pushOutbox(chatId, text, buttons as OutboxButton[][]);
+    return;
+  }
   const token = requireToken();
   const res = await fetch(`${API}/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text }),
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      ...(buttons.length > 0 ? { reply_markup: { inline_keyboard: buttons } } : {}),
+    }),
   });
   if (!res.ok) throw new Error(`Telegram sendMessage failed: ${res.status}`);
+}
+
+export async function answerCallbackQuery(callbackId: string): Promise<void> {
+  if (env.DEV_MODE) return;
+  const token = requireToken();
+  await fetch(`${API}/bot${token}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: callbackId }),
+  });
 }
 
 export async function downloadVoiceFile(fileId: string): Promise<Buffer> {

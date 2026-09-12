@@ -11,6 +11,13 @@ export const telegramUpdateSchema = z.object({
       voice: z.object({ file_id: z.string() }).optional(),
     })
     .optional(),
+  callback_query: z
+    .object({
+      id: z.string(),
+      data: z.string().optional(),
+      message: z.object({ chat: z.object({ id: z.number() }) }).optional(),
+    })
+    .optional(),
 });
 
 export type TelegramUpdate = z.infer<typeof telegramUpdateSchema>;
