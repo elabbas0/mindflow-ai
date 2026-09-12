@@ -5,13 +5,14 @@ import type { TelegramUpdate } from '../telegram/telegram.schemas.js';
 import { isVoiceConfigured, transcribeTelegramVoice } from '../transcription/transcription.service.js';
 import { getSessionStore, type Session } from './session.store.js';
 import { getUserStore } from '../users/users.repository.js';
+import { listUserItems, parseListRequest } from './list-intent.js';
 import { CATEGORY_IDS, FIELD_LABELS, FIELD_ORDER, type CategoryId } from './category-fields.js';
 
 const GREETING = `Hi! I'm MindFlow 🧠\nSend me anything — a task, a meeting, a project idea, or a note — and I'll organize it for you.`;
 
-const HELP = `Here's how I work:\n1. Send me anything (text or voice).\n2. Pick one of 4 categories.\n3. Answer my follow-up questions, one at a time.\n\nCommands:\n/start — start over\ncancel — stop what we're doing\n/help — show this message`;
+const HELP = `Here's how I work:\n1. Send me anything (text or voice).\n2. Pick one of 4 categories.\n3. Answer my follow-up questions, one at a time.\n\nCommands:\n/start — start over\ncancel — stop what we're doing\n/list — show my saved items\n/help — show this message`;
 
-const CANCEL_WORDS = new Set(['cancel', '/cancel', 'stop', 'ləğv et', 'ləğv', 'imtina']);
+const CANCEL_WORDS = new Set(['cancel', '/cancel', 'stop', 'ləğv et', 'ləğv', 'legv et', 'legv', 'imtina']);
 
 interface CallbackSelection {
   id: string;
@@ -90,6 +91,14 @@ async function handleTextMessage(chatId: number, telegramId: number, text: strin
   }
   if (text === '/help') {
     await sendMessage(chatId, HELP);
+    return;
+  }
+  const listReq = parseListRequest(text);
+  if (listReq) {
+    await sendMessage(chatId, await listUserItems(telegramId, listReq.category));
+    if (session && session.status === 'awaiting_field' && session.pendingField) {
+      await sendMessage(chatId, `Please enter the ${FIELD_LABELS[session.pendingField]}.`);
+    }
     return;
   }
   if (session && session.status === 'awaiting_field') {

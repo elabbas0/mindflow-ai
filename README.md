@@ -64,3 +64,12 @@ Test endpoints for the frontend (no keys needed):
 - `GET https://<app>.up.railway.app/health` → `{"ok":true}`
 - `GET https://<app>.up.railway.app/api/events/demo` → sample events JSON
 - `GET https://<app>.up.railway.app/docs` → Swagger UI for the whole API
+
+Frontend API (identify the user with `telegramId` or `gmail`):
+
+- `GET /api/categories` → 4 categories, required fields, ask order
+- `GET|POST /api/users` → look up or get-or-create an account
+- `GET /api/items` → list (optional `category`, `limit`)
+- `GET|PATCH|DELETE /api/items/:id` → read, edit, delete (owner only)
+- `POST /api/items` → create (all required fields enforced)
+- `POST /api/assistant/ask` → Q&A over saved items
