@@ -30,3 +30,13 @@ npm run build && npm start
 
 Set the Telegram webhook to `POST https://<host>/api/telegram/webhook`
 with header `x-telegram-bot-api-secret-token: <TELEGRAM_WEBHOOK_SECRET>`.
+
+## Hosting (Railway)
+
+The service deploys from the `backend` branch only (`railway.json` holds the
+build/start commands and the `/health` healthcheck).
+
+Test endpoints for the frontend (no keys needed):
+
+- `GET https://<app>.up.railway.app/health` → `{"ok":true}`
+- `GET https://<app>.up.railway.app/api/events/demo` → sample events JSON
