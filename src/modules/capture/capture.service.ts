@@ -1,18 +1,10 @@
 import { answerCallbackQuery, sendMessage } from '../../infra/telegram/client.js';
+import { getItemStore } from '../events/items.repository.js';
+import { getExtractionProvider } from '../extraction/extraction.provider.js';
 import type { TelegramUpdate } from '../telegram/telegram.schemas.js';
-import { getSessionStore } from './session.store.js';
+import { getSessionStore, type Session } from './session.store.js';
 import { getUserStore } from '../users/users.repository.js';
-
-export const CATEGORIES = [
-  { id: 'todo', label: '📋 To Do List' },
-  { id: 'projects', label: '📁 Projects' },
-  { id: 'meetings', label: '📅 Meetings' },
-  { id: 'notes', label: '📝 Notes' },
-] as const;
-
-export type CategoryId = (typeof CATEGORIES)[number]['id'];
-
-const CATEGORY_IDS = new Set<string>(CATEGORIES.map((c) => c.id));
+import { CATEGORY_IDS, FIELD_LABELS, FIELD_ORDER, type CategoryId } from './category-fields.js';
 
 const GREETING = `Hi! I'm MindFlow 🧠\nSend me anything — a task, a meeting, a project idea, or a note — and I'll organize it for you.`;
 
@@ -22,7 +14,7 @@ interface CallbackSelection {
   chatId?: number;
 }
 
-/** PRD capture flow step 1: remember the message, ask for a category. */
+/** PRD capture flow: remember the message, pick a category, fill missing fields one by one. */
 export async function handleCapture(update: TelegramUpdate): Promise<void> {
   if (update.callback_query) {
     await handleCategoryChoice({
@@ -44,8 +36,6 @@ export async function handleCapture(update: TelegramUpdate): Promise<void> {
   }
 
   const text = (message.text ?? '').trim();
-  if (!text) return;
-
   if (text === '/start') {
     await getUserStore().getOrCreate(telegramId);
     await getSessionStore().clear(chatId);
@@ -53,8 +43,16 @@ export async function handleCapture(update: TelegramUpdate): Promise<void> {
     return;
   }
 
+  const sessions = getSessionStore();
+  const session = await sessions.get(chatId);
+  if (session && session.status === 'awaiting_field') {
+    await handleFieldAnswer(chatId, session, text);
+    return;
+  }
+  if (!text) return;
+
   await getUserStore().getOrCreate(telegramId);
-  await getSessionStore().save({
+  await sessions.save({
     chatId,
     userId: telegramId,
     status: 'awaiting_category',
@@ -79,14 +77,56 @@ async function handleCategoryChoice(query: CallbackSelection): Promise<void> {
   const category = data.startsWith('cat:') ? data.slice('cat:'.length) : '';
   if (!CATEGORY_IDS.has(category)) return;
 
-  const session = await getSessionStore().get(query.chatId);
+  const sessions = getSessionStore();
+  const session = await sessions.get(query.chatId);
   if (!session || session.status !== 'awaiting_category') return;
 
-  const label = CATEGORIES.find((c) => c.id === category)?.label ?? category;
-  await getSessionStore().save({
+  const found = await getExtractionProvider().extract(session.draft.rawText);
+  const fields: Record<string, string> = {};
+  for (const [key, value] of Object.entries(found)) {
+    if (value) fields[key] = value;
+  }
+  await continueCapture(query.chatId, {
     ...session,
     status: 'awaiting_field',
-    draft: { ...session.draft, category },
+    draft: { ...session.draft, category, fields },
   });
-  await sendMessage(query.chatId, `Saved category: ${label}.`);
+}
+
+async function handleFieldAnswer(chatId: number, session: Session, text: string): Promise<void> {
+  const category = session.draft.category as CategoryId | undefined;
+  const field = session.pendingField;
+  if (!field || !category || !FIELD_ORDER[category]) {
+    await getSessionStore().clear(chatId);
+    return;
+  }
+  if (!text) {
+    await sendMessage(chatId, `Please enter the ${FIELD_LABELS[field]}.`);
+    return;
+  }
+
+  const found = await getExtractionProvider().extract(text);
+  const fields = { ...session.draft.fields };
+  for (const [key, value] of Object.entries(found)) {
+    if (value && !fields[key]) fields[key] = value;
+  }
+  if (!fields[field]) fields[field] = text;
+  await continueCapture(chatId, { ...session, draft: { ...session.draft, fields } });
+}
+
+/** Ask the next missing field, or save when everything is complete. */
+async function continueCapture(chatId: number, session: Session): Promise<void> {
+  const category = session.draft.category as CategoryId;
+  const order = FIELD_ORDER[category] ?? [];
+  const missing = order.find((name) => !session.draft.fields[name]?.trim());
+  const sessions = getSessionStore();
+
+  if (!missing) {
+    await getItemStore().save({ userId: session.userId, category, fields: session.draft.fields });
+    await sessions.clear(chatId);
+    await sendMessage(chatId, 'Saved successfully.');
+    return;
+  }
+  await sessions.save({ ...session, status: 'awaiting_field', pendingField: missing });
+  await sendMessage(chatId, `Please enter the ${FIELD_LABELS[missing]}.`);
 }
