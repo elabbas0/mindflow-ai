@@ -1,3 +1,6 @@
+import { env } from '../../config/env.js';
+import { GeminiExtractionProvider } from './gemini.provider.js';
+
 export interface ExtractedFields {
   title?: string;
   description?: string;
@@ -60,6 +63,11 @@ class StubExtractionProvider implements ExtractionProvider {
 let provider: ExtractionProvider | null = null;
 
 export function getExtractionProvider(): ExtractionProvider {
-  if (!provider) provider = new StubExtractionProvider();
+  if (!provider) {
+    provider =
+      env.LLM_PROVIDER === 'gemini' && env.GEMINI_API_KEY
+        ? new GeminiExtractionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL)
+        : new StubExtractionProvider();
+  }
   return provider;
 }

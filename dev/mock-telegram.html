@@ -29,6 +29,10 @@
     <input id="api" value="http://127.0.0.1:3000" />
     <button class="action" onclick="resetChat()">Reset</button>
   </div>
+  <div id="bar">
+    <span>Secret:</span>
+    <input id="secret" placeholder="x-telegram-bot-api-secret-token (optional)" />
+  </div>
   <div id="status"></div>
   <div id="log"></div>
   <div id="row">
@@ -56,9 +60,12 @@ function bubble(cls, text) {
 }
 
 async function postUpdate(payload) {
+  const headers = { 'content-type': 'application/json' };
+  const secret = document.getElementById('secret').value.trim();
+  if (secret) headers['x-telegram-bot-api-secret-token'] = secret;
   const res = await fetch(api() + '/api/telegram/webhook', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
   });
   if (!res.ok) status('webhook error: ' + res.status);
