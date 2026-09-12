@@ -9,6 +9,10 @@ import { CATEGORY_IDS, FIELD_LABELS, FIELD_ORDER, type CategoryId } from './cate
 
 const GREETING = `Hi! I'm MindFlow 🧠\nSend me anything — a task, a meeting, a project idea, or a note — and I'll organize it for you.`;
 
+const HELP = `Here's how I work:\n1. Send me anything (text or voice).\n2. Pick one of 4 categories.\n3. Answer my follow-up questions, one at a time.\n\nCommands:\n/start — start over\ncancel — stop what we're doing\n/help — show this message`;
+
+const CANCEL_WORDS = new Set(['cancel', '/cancel', 'stop', 'ləğv et', 'ləğv', 'imtina']);
+
 interface CallbackSelection {
   id: string;
   data?: string;
@@ -73,6 +77,19 @@ async function handleTextMessage(chatId: number, telegramId: number, text: strin
   if (text === '/start') {
     await sessions.clear(chatId);
     await sendMessage(chatId, GREETING);
+    return;
+  }
+  if (CANCEL_WORDS.has(text.toLowerCase())) {
+    if (session && session.status !== 'idle') {
+      await sessions.clear(chatId);
+      await sendMessage(chatId, 'Cancelled. Send me anything to start over.');
+    } else {
+      await sendMessage(chatId, HELP);
+    }
+    return;
+  }
+  if (text === '/help') {
+    await sendMessage(chatId, HELP);
     return;
   }
   if (session && session.status === 'awaiting_field') {

@@ -4,7 +4,22 @@ import { handleTelegramUpdate } from './telegram.service.js';
 import { telegramUpdateSchema } from './telegram.schemas.js';
 
 export async function telegramRoutes(app: FastifyInstance): Promise<void> {
-  app.post('/api/telegram/webhook', async (req, reply) => {
+  app.post(
+    '/api/telegram/webhook',
+    {
+      schema: {
+        tags: ['telegram'],
+        summary: 'Receives Telegram updates (messages, voice, button taps)',
+        description:
+          'Set as the bot webhook via setWebhook. Requires the x-telegram-bot-api-secret-token header when TELEGRAM_WEBHOOK_SECRET is configured.',
+        response: {
+          200: { type: 'object', properties: { ok: { type: 'boolean' } } },
+          400: { type: 'object', properties: { ok: { type: 'boolean' } } },
+          401: { type: 'object', properties: { ok: { type: 'boolean' } } },
+        },
+      },
+    },
+    async (req, reply) => {
     if (env.TELEGRAM_WEBHOOK_SECRET) {
       const got = req.headers['x-telegram-bot-api-secret-token'];
       if (got !== env.TELEGRAM_WEBHOOK_SECRET) {
@@ -25,5 +40,6 @@ export async function telegramRoutes(app: FastifyInstance): Promise<void> {
       req.log.error({ err }, 'Failed to handle Telegram update');
     }
     return reply.send({ ok: true });
-  });
+    },
+  );
 }

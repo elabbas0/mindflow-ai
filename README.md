@@ -63,3 +63,4 @@ Test endpoints for the frontend (no keys needed):
 
 - `GET https://<app>.up.railway.app/health` → `{"ok":true}`
 - `GET https://<app>.up.railway.app/api/events/demo` → sample events JSON
+- `GET https://<app>.up.railway.app/docs` → Swagger UI for the whole API

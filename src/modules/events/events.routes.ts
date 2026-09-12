@@ -8,5 +8,34 @@ const DEMO_EVENTS = [
 ];
 
 export async function eventsRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/events/demo', async () => ({ ok: true, events: DEMO_EVENTS }));
+  app.get(
+    '/api/events/demo',
+    {
+      schema: {
+        tags: ['events'],
+        summary: 'Static sample events (no keys needed)',
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              ok: { type: 'boolean' },
+              events: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    title: { type: 'string' },
+                    startsAt: { type: ['string', 'null'] },
+                    notes: { type: ['string', 'null'] },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async () => ({ ok: true, events: DEMO_EVENTS }),
+  );
 }
