@@ -54,24 +54,70 @@ export async function handleCapture(update: TelegramUpdate): Promise<void> {
   await handleTextMessage(chatId, telegramId, (message.text ?? '').trim());
 }
 
+const GMAIL_PROMPT = 'Welcome to MindFlow! Please share your gmail address to set up your account.';
+
+function isValidGmail(text: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
+}
+
 async function handleTextMessage(chatId: number, telegramId: number, text: string): Promise<void> {
+  const users = getUserStore();
+  const sessions = getSessionStore();
+  const { user } = await users.getOrCreate(telegramId);
+  const session = await sessions.get(chatId);
+
+  if (!user.gmail) {
+    await handleGmailSetup(chatId, telegramId, session, text);
+    return;
+  }
   if (text === '/start') {
-    await getUserStore().getOrCreate(telegramId);
-    await getSessionStore().clear(chatId);
+    await sessions.clear(chatId);
     await sendMessage(chatId, GREETING);
     return;
   }
-
-  const sessions = getSessionStore();
-  const session = await sessions.get(chatId);
   if (session && session.status === 'awaiting_field') {
     await handleFieldAnswer(chatId, session, text);
     return;
   }
   if (!text) return;
 
-  await getUserStore().getOrCreate(telegramId);
+  await startCapture(chatId, telegramId, text);
+}
+
+/** PRD first-run setup: brand-new users share a gmail address before anything else. */
+async function handleGmailSetup(
+  chatId: number,
+  telegramId: number,
+  session: Session | null,
+  text: string,
+): Promise<void> {
+  const sessions = getSessionStore();
+  if (session?.status === 'awaiting_gmail') {
+    if (!isValidGmail(text)) {
+      await sendMessage(chatId, 'That does not look like a valid gmail address. Please try again.');
+      return;
+    }
+    await getUserStore().setGmail(telegramId, text);
+    const pending = session.draft.rawText;
+    if (pending) {
+      await startCapture(chatId, telegramId, pending);
+    } else {
+      await sessions.clear(chatId);
+      await sendMessage(chatId, GREETING);
+    }
+    return;
+  }
   await sessions.save({
+    chatId,
+    userId: telegramId,
+    status: 'awaiting_gmail',
+    draft: { rawText: text === '/start' ? '' : text, fields: {} },
+  });
+  await sendMessage(chatId, GMAIL_PROMPT);
+}
+
+async function startCapture(chatId: number, telegramId: number, text: string): Promise<void> {
+  await getSessionStore().save({
     chatId,
     userId: telegramId,
     status: 'awaiting_category',

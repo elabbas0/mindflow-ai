@@ -2,21 +2,33 @@
 
 ## Backend (Node.js + Fastify + TypeScript)
 
-Modular monolith on the `backend` branch. Pipeline: Telegram webhook → Whisper → GPT-4o → Supabase.
+Modular monolith on the `backend` branch. Pipeline: Telegram webhook → Groq Whisper → Gemini Flash-Lite → Supabase.
 
 ```
 src/
-  server.ts / app.ts            # entry + Fastify wiring (/health, /api/telegram/webhook)
+  server.ts / app.ts            # entry + Fastify wiring
   config/env.ts                 # zod-validated env (.env.example)
   modules/
     telegram/                   # webhook route, update schemas, dispatcher
-    transcription/              # voice file_id -> Whisper text
-    extraction/                 # text -> GPT-4o event draft (JSON)
-    events/                     # draft -> Supabase `events` table
+    capture/                    # PRD conversation loop: gmail setup, category, missing fields
+    transcription/              # voice file_id -> Groq Whisper text
+    extraction/                 # text -> Gemini Flash-Lite fields (stub fallback, no key needed)
+    events/                     # saved items store (memory | supabase)
+    assistant/                  # POST /api/assistant/ask over saved items
+    users/                      # telegram_id <-> gmail accounts
   infra/
-    telegram/ openai/ supabase/ # external clients (one place each)
+    telegram/ supabase/         # external clients (one place each)
   shared/                       # AppError, NotConfiguredError
 ```
+
+Providers are free-tier: Gemini Flash-Lite (`GEMINI_API_KEY`, ~1k req/day)
+for extraction and Q&A, Groq Whisper (`GROQ_API_KEY`, 2k voices/day) for
+speech-to-text. Without keys the bot still runs: extraction falls back to a
+regex stub and voice replies that setup is pending.
+
+Persistence: `STORE=memory` (local) or `STORE=supabase`. For Supabase, run
+`supabase/migrations/0001_init.sql` once in the SQL editor, then set
+`SUPABASE_URL` + key and `STORE=supabase`.
 
 Quickstart:
 

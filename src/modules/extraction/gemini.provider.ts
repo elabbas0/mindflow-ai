@@ -52,6 +52,12 @@ function safeParse(raw: string): ExtractedFields | null {
   }
 }
 
+export interface GeminiTextOptions {
+  json?: boolean;
+  temperature?: number;
+  maxOutputTokens?: number;
+}
+
 /** Production extractor: Gemini Flash-Lite (free tier), JSON mode, one retry. */
 export class GeminiExtractionProvider implements ExtractionProvider {
   constructor(
@@ -60,35 +66,47 @@ export class GeminiExtractionProvider implements ExtractionProvider {
   ) {}
 
   async extract(text: string): Promise<ExtractedFields> {
-    const first = await this.complete(text, false);
+    const first = await generateText(this.apiKey, this.model, systemPrompt(), text, { json: true });
     const parsed = safeParse(first);
     if (parsed) return parsed;
-    const second = await this.complete(text, true);
+    const second = await generateText(
+      this.apiKey,
+      this.model,
+      systemPrompt(),
+      `${text}\n\nPrevious reply was not valid JSON. Reply with valid JSON only.`,
+      { json: true },
+    );
     return safeParse(second) ?? {};
   }
+}
 
-  private async complete(text: string, retry: boolean): Promise<string> {
-    const userText = retry
-      ? `${text}\n\nPrevious reply was not valid JSON. Reply with valid JSON only.`
-      : text;
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt() }] },
-          contents: [{ role: 'user', parts: [{ text: userText }] }],
-          generationConfig: { responseMimeType: 'application/json', temperature: 0.2, maxOutputTokens: 512 },
-        }),
-      },
-    );
-    if (!res.ok) throw new Error(`Gemini request failed: ${res.status}`);
-    const json = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-    };
-    return (
-      json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? ''
-    );
-  }
+/** Minimal Gemini generateContent call (free tier), shared by extraction and assistant. */
+export async function generateText(
+  apiKey: string,
+  model: string,
+  system: string,
+  userText: string,
+  options: GeminiTextOptions = {},
+): Promise<string> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text: userText }] }],
+        generationConfig: {
+          ...(options.json ? { responseMimeType: 'application/json' } : {}),
+          temperature: options.temperature ?? 0.2,
+          maxOutputTokens: options.maxOutputTokens ?? 512,
+        },
+      }),
+    },
+  );
+  if (!res.ok) throw new Error(`Gemini request failed: ${res.status}`);
+  const json = (await res.json()) as {
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+  };
+  return json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
 }

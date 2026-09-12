@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import { env } from './config/env.js';
 import { devRoutes } from './dev/dev.routes.js';
+import { assistantRoutes } from './modules/assistant/assistant.routes.js';
 import { eventsRoutes } from './modules/events/events.routes.js';
 import { telegramRoutes } from './modules/telegram/telegram.routes.js';
 
@@ -15,6 +16,7 @@ export function buildApp(): FastifyInstance {
   app.get('/health', async () => ({ ok: true }));
   void app.register(telegramRoutes);
   void app.register(eventsRoutes);
+  void app.register(assistantRoutes);
 
   if (env.DEV_MODE) {
     void app.register(devRoutes);

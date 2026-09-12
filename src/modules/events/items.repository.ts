@@ -11,6 +11,7 @@ export interface ItemRecord {
 
 export interface ItemStore {
   save(item: { userId: number; category: string; fields: Record<string, string> }): Promise<ItemRecord>;
+  listByUser(userId: number): Promise<ItemRecord[]>;
 }
 
 class MemoryItemStore implements ItemStore {
@@ -20,6 +21,10 @@ class MemoryItemStore implements ItemStore {
     const record = { ...item, id: randomUUID() };
     this.items.push(record);
     return record;
+  }
+
+  async listByUser(userId: number): Promise<ItemRecord[]> {
+    return this.items.filter((item) => item.userId === userId).reverse();
   }
 }
 
@@ -41,6 +46,23 @@ class SupabaseItemStore implements ItemStore {
     if (error) throw new Error(`Supabase item insert failed: ${error.message}`);
     const row = data as unknown as ItemRow;
     return { id: row.id, userId: row.user_id, category: row.category, fields: row.fields };
+  }
+
+  async listByUser(userId: number): Promise<ItemRecord[]> {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('items')
+      .select('id, user_id, category, fields')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (error) throw new Error(`Supabase items query failed: ${error.message}`);
+    return (data as unknown as ItemRow[]).map((row) => ({
+      id: row.id,
+      userId: row.user_id,
+      category: row.category,
+      fields: row.fields,
+    }));
   }
 }
 

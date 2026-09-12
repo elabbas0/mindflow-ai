@@ -1,7 +1,7 @@
 import { env } from '../../config/env.js';
 import { getSupabase } from '../../infra/supabase/client.js';
 
-export type CaptureStatus = 'idle' | 'awaiting_category' | 'awaiting_field';
+export type CaptureStatus = 'idle' | 'awaiting_gmail' | 'awaiting_category' | 'awaiting_field';
 
 export interface Draft {
   rawText: string;
