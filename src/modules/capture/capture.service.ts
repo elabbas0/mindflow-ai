@@ -2,6 +2,7 @@ import { answerCallbackQuery, sendMessage } from '../../infra/telegram/client.js
 import { getItemStore } from '../events/items.repository.js';
 import { getExtractionProvider } from '../extraction/extraction.provider.js';
 import type { TelegramUpdate } from '../telegram/telegram.schemas.js';
+import { isVoiceConfigured, transcribeTelegramVoice } from '../transcription/transcription.service.js';
 import { getSessionStore, type Session } from './session.store.js';
 import { getUserStore } from '../users/users.repository.js';
 import { CATEGORY_IDS, FIELD_LABELS, FIELD_ORDER, type CategoryId } from './category-fields.js';
@@ -31,11 +32,29 @@ export async function handleCapture(update: TelegramUpdate): Promise<void> {
   const telegramId = message.from?.id ?? chatId;
 
   if (message.voice) {
-    await sendMessage(chatId, 'Voice notes are coming soon — please send text for now.');
+    if (!isVoiceConfigured()) {
+      await sendMessage(chatId, 'Voice notes are not set up yet — please send text for now.');
+      return;
+    }
+    let transcript: string;
+    try {
+      transcript = (await transcribeTelegramVoice(message.voice.file_id)).trim();
+    } catch {
+      await sendMessage(chatId, 'Sorry, I could not hear that voice note. Please try again or send text.');
+      return;
+    }
+    if (!transcript) {
+      await sendMessage(chatId, 'Sorry, I could not hear that voice note. Please try again or send text.');
+      return;
+    }
+    await handleTextMessage(chatId, telegramId, transcript);
     return;
   }
 
-  const text = (message.text ?? '').trim();
+  await handleTextMessage(chatId, telegramId, (message.text ?? '').trim());
+}
+
+async function handleTextMessage(chatId: number, telegramId: number, text: string): Promise<void> {
   if (text === '/start') {
     await getUserStore().getOrCreate(telegramId);
     await getSessionStore().clear(chatId);
