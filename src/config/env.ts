@@ -9,7 +9,7 @@ const envSchema = z.object({
   TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
-  GEMINI_MODEL: z.string().default('gemini-2.0-flash-lite'),
+  GEMINI_MODEL: z.string().default('gemini-flash-lite-latest'),
   LLM_PROVIDER: z.enum(['gemini', 'stub']).default('gemini'),
   GROQ_API_KEY: z.string().optional(),
   SUPABASE_URL: z.string().url().optional(),
