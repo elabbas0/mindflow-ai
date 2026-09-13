@@ -5,6 +5,7 @@ const extractedSchema = z
   .object({
     title: z.string().optional(),
     description: z.string().optional(),
+    // `notes` kept only for reading old model outputs / old stored items
     notes: z.string().optional(),
     location: z.string().optional(),
     deadline: z.string().optional(),
@@ -13,7 +14,7 @@ const extractedSchema = z
   })
   .passthrough();
 
-const KNOWN_KEYS = ['title', 'description', 'notes', 'location', 'deadline', 'date', 'time'] as const;
+const KNOWN_KEYS = ['title', 'description', 'location', 'deadline', 'date', 'time'] as const;
 
 function todayBaku(): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -28,9 +29,9 @@ function systemPrompt(): string {
   return `You extract structured fields from a short user message (Azerbaijani or English) for a personal organizer app.
 Today is ${todayBaku()} (Asia/Baku timezone).
 Resolve relative dates (sabah, bugun, bu gun, next week, etc.) against today and output ISO YYYY-MM-DD for date and deadline; times as 24h HH:MM.
-Reply with JSON only, containing only keys you are confident about from: title, description, notes, location, deadline, date, time.
+Reply with JSON only, containing only keys you are confident about from: title, description, location, deadline, date, time.
 title: short 3-8 word name of the task/meeting/project/note, never the whole message.
-description: what needs to be done. notes: extra context. location: venue, platform, or city.
+description: what needs to be done and any extra context/notes. location: venue, platform, or city.
 Omit keys you cannot determine. No markdown, no commentary.`;
 }
 
@@ -45,6 +46,11 @@ function safeParse(raw: string): ExtractedFields | null {
     for (const key of KNOWN_KEYS) {
       const value = parsed[key];
       if (typeof value === 'string' && value.trim()) out[key] = value.trim();
+    }
+    // backward compat: old outputs used `notes` for meetings
+    const notesVal = parsed['notes'];
+    if (typeof notesVal === 'string' && notesVal.trim() && !out['description']) {
+      out['description'] = notesVal.trim();
     }
     return out;
   } catch {

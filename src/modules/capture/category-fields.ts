@@ -13,14 +13,15 @@ export const CATEGORY_IDS = new Set<string>(CATEGORIES.map((c) => c.id));
 export const FIELD_ORDER: Record<CategoryId, string[]> = {
   todo: ['date', 'time', 'description'],
   projects: ['title', 'description', 'deadline'],
-  meetings: ['title', 'notes', 'location', 'date', 'time'],
+  meetings: ['title', 'description', 'location', 'date', 'time'],
   notes: ['title', 'description', 'time'],
 };
 
 export const FIELD_LABELS: Record<string, string> = {
   title: 'Title',
   description: 'Description',
-  notes: 'Notes',
+  // kept for reading old items that still have a `notes` field
+  notes: 'Description',
   location: 'Location',
   date: 'Date',
   time: 'Time',

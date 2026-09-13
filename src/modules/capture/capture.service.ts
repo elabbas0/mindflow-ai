@@ -74,9 +74,11 @@ function nextOnboardingStep(user: { gmail: string | null; firstName: string | nu
 
 function formatSavedItem(category: string, fields: Record<string, string>): string {
   const label = CATEGORIES.find((c) => c.id === category)?.label ?? category;
+  const normalized = { ...fields };
+  if (normalized['notes'] && !normalized['description']) normalized['description'] = normalized['notes'];
   const lines = CATEGORIES.find((c) => c.id === category)
-    ? FIELD_ORDER[category as CategoryId].map((name) => `• ${FIELD_LABELS[name]}: ${fields[name] ?? '—'}`)
-    : Object.entries(fields).map(([k, v]) => `• ${FIELD_LABELS[k] ?? k}: ${v}`);
+    ? FIELD_ORDER[category as CategoryId].map((name) => `• ${FIELD_LABELS[name]}: ${normalized[name] ?? '—'}`)
+    : Object.entries(normalized).map(([k, v]) => `• ${FIELD_LABELS[k] ?? k}: ${v}`);
   return `✅ Saved to ${label}\n${lines.join('\n')}`;
 }
 
@@ -254,20 +256,30 @@ async function handleProfileSetup(
   await startCapture(chatId, telegramId, text);
 }
 
+function normalizeFields(fields: Record<string, string>): Record<string, string> {
+  if (fields['notes'] && !fields['description']) return { ...fields, description: fields['notes'] };
+  return fields;
+}
+
 /** Ask the next missing field, or save when everything is complete. */
 async function continueCapture(chatId: number, session: Session): Promise<void> {
   const category = session.draft.category as CategoryId;
   const order = FIELD_ORDER[category] ?? [];
-  const missing = order.find((name) => !session.draft.fields[name]?.trim());
+  const normalized = normalizeFields(session.draft.fields);
+  const missing = order.find((name) => !normalized[name]?.trim());
   const sessions = getSessionStore();
 
   if (!missing) {
-    await getItemStore().save({ userId: session.userId, category, fields: session.draft.fields });
+    const toSave = { ...normalized };
+    delete (toSave as Record<string, string>)['notes'];
+    await getItemStore().save({ userId: session.userId, category, fields: toSave });
     await sessions.clear(chatId);
-    await sendMessage(chatId, formatSavedItem(category, session.draft.fields));
+    await sendMessage(chatId, formatSavedItem(category, toSave));
     return;
   }
-  await sessions.save({ ...session, status: 'awaiting_field', pendingField: missing });
+  // persist normalized so old `notes` counts as `description` going forward
+  const nextSession = normalized !== session.draft.fields ? { ...session, draft: { ...session.draft, fields: normalized } } : session;
+  await sessions.save({ ...nextSession, status: 'awaiting_field', pendingField: missing });
   await sendMessage(chatId, `Please enter the ${FIELD_LABELS[missing]}.`);
 }
 
