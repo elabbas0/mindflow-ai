@@ -5,7 +5,12 @@ import { getUserStore } from './users.repository.js';
 
 const userJson = {
   type: 'object',
-  properties: { telegramId: { type: 'number' }, gmail: { type: ['string', 'null'] } },
+  properties: {
+    telegramId: { type: 'number' },
+    gmail: { type: ['string', 'null'] },
+    firstName: { type: ['string', 'null'] },
+    lastName: { type: ['string', 'null'] },
+  },
 };
 
 export async function userRoutes(app: FastifyInstance): Promise<void> {
@@ -38,11 +43,16 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     {
       schema: {
         tags: ['users'],
-        summary: 'Get or create an account, optionally attaching a gmail',
+        summary: 'Get or create an account, optionally attaching gmail/name',
         body: {
           type: 'object',
           required: ['telegramId'],
-          properties: { telegramId: { type: 'number' }, gmail: { type: 'string' } },
+          properties: {
+            telegramId: { type: 'number' },
+            gmail: { type: 'string' },
+            firstName: { type: 'string' },
+            lastName: { type: 'string' },
+          },
         },
         response: {
           200: {
@@ -58,15 +68,27 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (req, reply) => {
-      const parsed = z.object({ telegramId: z.number(), gmail: z.string().optional() }).safeParse(req.body);
+      const parsed = z
+        .object({
+          telegramId: z.number(),
+          gmail: z.string().optional(),
+          firstName: z.string().optional(),
+          lastName: z.string().optional(),
+        })
+        .safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ ok: false, error: 'telegramId is required.' });
       const store = getUserStore();
       const { user, isNew } = await store.getOrCreate(parsed.data.telegramId);
-      const updated =
-        parsed.data.gmail && parsed.data.gmail !== user.gmail
-          ? await store.setGmail(parsed.data.telegramId, parsed.data.gmail)
-          : user;
-      return reply.send({ ok: true, user: updated, created: isNew });
+      let current = user;
+      if (parsed.data.gmail && parsed.data.gmail !== current.gmail) {
+        current = await store.setGmail(parsed.data.telegramId, parsed.data.gmail);
+      }
+      if (parsed.data.firstName !== undefined || parsed.data.lastName !== undefined) {
+        const firstName = parsed.data.firstName ?? current.firstName ?? '';
+        const lastName = parsed.data.lastName ?? current.lastName ?? '';
+        if (firstName || lastName) current = await store.setNames(parsed.data.telegramId, firstName, lastName);
+      }
+      return reply.send({ ok: true, user: current, created: isNew });
     },
   );
 }

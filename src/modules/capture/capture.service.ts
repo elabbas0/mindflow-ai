@@ -6,7 +6,7 @@ import { isVoiceConfigured, transcribeTelegramVoice } from '../transcription/tra
 import { getSessionStore, type Session } from './session.store.js';
 import { getUserStore } from '../users/users.repository.js';
 import { listUserItems, parseListRequest } from './list-intent.js';
-import { CATEGORY_IDS, FIELD_LABELS, FIELD_ORDER, type CategoryId } from './category-fields.js';
+import { CATEGORIES, CATEGORY_IDS, FIELD_LABELS, FIELD_ORDER, type CategoryId } from './category-fields.js';
 
 const GREETING = `Hi! I'm MindFlow 🧠\nSend me anything — a task, a meeting, a project idea, or a note — and I'll organize it for you.`;
 
@@ -65,14 +65,33 @@ function isValidGmail(text: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
 }
 
+function nextOnboardingStep(user: { gmail: string | null; firstName: string | null; lastName: string | null }): 'gmail' | 'firstName' | 'lastName' | null {
+  if (!user.gmail) return 'gmail';
+  if (!user.firstName) return 'firstName';
+  if (!user.lastName) return 'lastName';
+  return null;
+}
+
+function formatSavedItem(category: string, fields: Record<string, string>): string {
+  const label = CATEGORIES.find((c) => c.id === category)?.label ?? category;
+  const lines = CATEGORIES.find((c) => c.id === category)
+    ? FIELD_ORDER[category as CategoryId].map((name) => `• ${FIELD_LABELS[name]}: ${fields[name] ?? '—'}`)
+    : Object.entries(fields).map(([k, v]) => `• ${FIELD_LABELS[k] ?? k}: ${v}`);
+  return `✅ Saved to ${label}\n${lines.join('\n')}`;
+}
+
+function needsProfile(user: { gmail: string | null; firstName: string | null; lastName: string | null }): boolean {
+  return !!nextOnboardingStep(user);
+}
+
 async function handleTextMessage(chatId: number, telegramId: number, text: string): Promise<void> {
   const users = getUserStore();
   const sessions = getSessionStore();
   const { user } = await users.getOrCreate(telegramId);
   const session = await sessions.get(chatId);
 
-  if (!user.gmail) {
-    await handleGmailSetup(chatId, telegramId, session, text);
+  if (needsProfile(user) || (session && ['awaiting_gmail', 'awaiting_first_name', 'awaiting_last_name'].includes(session.status))) {
+    await handleProfileSetup(chatId, telegramId, session, text);
     return;
   }
   if (text === '/start') {
@@ -110,21 +129,58 @@ async function handleTextMessage(chatId: number, telegramId: number, text: strin
   await startCapture(chatId, telegramId, text);
 }
 
-/** PRD first-run setup: brand-new users share a gmail address before anything else. */
-async function handleGmailSetup(
+/** PRD first-run setup + added name/surname step: completes profile before capture. */
+async function handleProfileSetup(
   chatId: number,
   telegramId: number,
   session: Session | null,
   text: string,
 ): Promise<void> {
+  const users = getUserStore();
   const sessions = getSessionStore();
+  if (CANCEL_WORDS.has(text.toLowerCase())) {
+    await sessions.clear(chatId);
+    await sendMessage(chatId, 'Cancelled. Send me anything to start over.');
+    return;
+  }
+  if (text === '/start' || text === '/help') {
+    await sessions.clear(chatId);
+    await sendMessage(chatId, text === '/help' ? HELP : GMAIL_PROMPT);
+    if (text === '/help') return;
+    const { user: fresh } = await users.getOrCreate(telegramId);
+    const nxt = nextOnboardingStep(fresh);
+    if (nxt === 'firstName') {
+      await sessions.save({ chatId, userId: telegramId, status: 'awaiting_first_name', draft: { rawText: '', fields: {} } });
+      await sendMessage(chatId, 'Thanks! What is your first name?');
+    } else if (nxt === 'lastName') {
+      await sessions.save({ chatId, userId: telegramId, status: 'awaiting_last_name', draft: { rawText: '', fields: {} } });
+      await sendMessage(chatId, 'And your last name?');
+    } else if (nxt === 'gmail') {
+      await sessions.save({ chatId, userId: telegramId, status: 'awaiting_gmail', draft: { rawText: '', fields: {} } });
+    }
+    return;
+  }
+  const { user } = await users.getOrCreate(telegramId);
+
   if (session?.status === 'awaiting_gmail') {
     if (!isValidGmail(text)) {
       await sendMessage(chatId, 'That does not look like a valid gmail address. Please try again.');
       return;
     }
-    await getUserStore().setGmail(telegramId, text);
+    await users.setGmail(telegramId, text);
     const pending = session.draft.rawText;
+    const updated = await users.find(telegramId);
+    const next = nextOnboardingStep(updated ?? { gmail: text, firstName: null, lastName: null });
+    if (next === 'firstName') {
+      await sessions.save({ chatId, userId: telegramId, status: 'awaiting_first_name', draft: { rawText: pending, fields: {} } });
+      await sendMessage(chatId, 'Thanks! What is your first name?');
+      return;
+    }
+    if (next === 'lastName') {
+      await sessions.save({ chatId, userId: telegramId, status: 'awaiting_last_name', draft: { rawText: pending, fields: {} } });
+      await sendMessage(chatId, 'And your last name?');
+      return;
+    }
     if (pending) {
       await startCapture(chatId, telegramId, pending);
     } else {
@@ -133,13 +189,86 @@ async function handleGmailSetup(
     }
     return;
   }
-  await sessions.save({
-    chatId,
-    userId: telegramId,
-    status: 'awaiting_gmail',
-    draft: { rawText: text === '/start' ? '' : text, fields: {} },
-  });
-  await sendMessage(chatId, GMAIL_PROMPT);
+  if (session?.status === 'awaiting_first_name') {
+    if (!text) {
+      await sendMessage(chatId, 'Please enter your first name.');
+      return;
+    }
+    const maybeLast = text.trim().split(/\s+/);
+    if (maybeLast.length >= 2) {
+      await users.setNames(telegramId, maybeLast[0], maybeLast.slice(1).join(' '));
+      const pending2 = session.draft.rawText;
+      if (pending2) await startCapture(chatId, telegramId, pending2);
+      else { await sessions.clear(chatId); await sendMessage(chatId, GREETING); }
+      return;
+    }
+    await users.setFirstName(telegramId, text.trim());
+    await sessions.save({ chatId, userId: telegramId, status: 'awaiting_last_name', draft: session.draft });
+    await sendMessage(chatId, 'And your last name?');
+    return;
+  }
+  if (session?.status === 'awaiting_last_name') {
+    if (!text) {
+      await sendMessage(chatId, 'Please enter your last name.');
+      return;
+    }
+    await users.setLastName(telegramId, text.trim());
+    const pending3 = session.draft.rawText;
+    if (pending3) await startCapture(chatId, telegramId, pending3);
+    else { await sessions.clear(chatId); await sendMessage(chatId, GREETING); }
+    return;
+  }
+
+  const next = nextOnboardingStep(user);
+  if (next === 'gmail') {
+    await sessions.save({
+      chatId,
+      userId: telegramId,
+      status: 'awaiting_gmail',
+      draft: { rawText: text === '/start' ? '' : text, fields: {} },
+    });
+    await sendMessage(chatId, GMAIL_PROMPT);
+    return;
+  }
+  if (next === 'firstName') {
+    await sessions.save({
+      chatId,
+      userId: telegramId,
+      status: 'awaiting_first_name',
+      draft: { rawText: text === '/start' ? '' : text, fields: {} },
+    });
+    await sendMessage(chatId, 'Thanks! What is your first name?');
+    return;
+  }
+  if (next === 'lastName') {
+    await sessions.save({
+      chatId,
+      userId: telegramId,
+      status: 'awaiting_last_name',
+      draft: { rawText: text === '/start' ? '' : text, fields: {} },
+    });
+    await sendMessage(chatId, 'And your last name?');
+    return;
+  }
+  if (!text) return;
+  await startCapture(chatId, telegramId, text);
+}
+
+/** Ask the next missing field, or save when everything is complete. */
+async function continueCapture(chatId: number, session: Session): Promise<void> {
+  const category = session.draft.category as CategoryId;
+  const order = FIELD_ORDER[category] ?? [];
+  const missing = order.find((name) => !session.draft.fields[name]?.trim());
+  const sessions = getSessionStore();
+
+  if (!missing) {
+    await getItemStore().save({ userId: session.userId, category, fields: session.draft.fields });
+    await sessions.clear(chatId);
+    await sendMessage(chatId, formatSavedItem(category, session.draft.fields));
+    return;
+  }
+  await sessions.save({ ...session, status: 'awaiting_field', pendingField: missing });
+  await sendMessage(chatId, `Please enter the ${FIELD_LABELS[missing]}.`);
 }
 
 async function startCapture(chatId: number, telegramId: number, text: string): Promise<void> {
@@ -203,21 +332,4 @@ async function handleFieldAnswer(chatId: number, session: Session, text: string)
   }
   if (!fields[field]) fields[field] = text;
   await continueCapture(chatId, { ...session, draft: { ...session.draft, fields } });
-}
-
-/** Ask the next missing field, or save when everything is complete. */
-async function continueCapture(chatId: number, session: Session): Promise<void> {
-  const category = session.draft.category as CategoryId;
-  const order = FIELD_ORDER[category] ?? [];
-  const missing = order.find((name) => !session.draft.fields[name]?.trim());
-  const sessions = getSessionStore();
-
-  if (!missing) {
-    await getItemStore().save({ userId: session.userId, category, fields: session.draft.fields });
-    await sessions.clear(chatId);
-    await sendMessage(chatId, 'Saved successfully.');
-    return;
-  }
-  await sessions.save({ ...session, status: 'awaiting_field', pendingField: missing });
-  await sendMessage(chatId, `Please enter the ${FIELD_LABELS[missing]}.`);
 }
