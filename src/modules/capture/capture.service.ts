@@ -85,7 +85,7 @@ const FIELD_LABELS_I18N: Record<'en' | 'az', Record<string, string>> = {
   az: { title: 'Başlıq', description: 'Təsvir', location: 'Məkan', date: 'Tarix', time: 'Vaxt', deadline: 'Son tarix', notes: 'Təsvir' },
 };
 
-const CANCEL_WORDS = new Set(['cancel', '/cancel', 'stop', 'ləğv et', 'ləğv', 'legv et', 'legv', 'imtina']);
+const CANCEL_WORDS = new Set(['cancel', '/cancel', 'stop', '/stop', 'ləğv et', 'ləğv', 'legv et', 'legv', 'imtina']);
 
 const EDIT_WORDS = new Set([
   '/edit',
@@ -168,10 +168,16 @@ function isValidName(text: string): boolean {
   return true;
 }
 
+function storedNameOk(name: string | null): boolean {
+  if (!name) return false;
+  if (name.startsWith('/')) return false;
+  return true;
+}
+
 function nextOnboardingStep(user: { gmail: string | null; firstName: string | null; lastName: string | null }): 'gmail' | 'firstName' | 'lastName' | null {
   if (!user.gmail) return 'gmail';
-  if (!user.firstName) return 'firstName';
-  if (!user.lastName) return 'lastName';
+  if (!storedNameOk(user.firstName)) return 'firstName';
+  if (!storedNameOk(user.lastName)) return 'lastName';
   return null;
 }
 
@@ -273,18 +279,23 @@ async function handleProfileSetup(
   }
   if (text === '/start' || text === '/help') {
     await sessions.clear(chatId);
-    await sendMessage(chatId, text === '/help' ? tr(lang, 'help') : tr(lang, 'gmail_prompt'));
-    if (text === '/help') return;
+    if (text === '/help') {
+      await sendMessage(chatId, tr(lang, 'help'));
+      return;
+    }
     const { user: fresh } = await users.getOrCreate(telegramId);
     const nxt = nextOnboardingStep(fresh);
-    if (nxt === 'firstName') {
+    if (nxt === 'gmail') {
+      await sessions.save({ chatId, userId: telegramId, status: 'awaiting_gmail', draft: { rawText: '', fields: {} } });
+      await sendMessage(chatId, tr(lang, 'gmail_prompt'));
+    } else if (nxt === 'firstName') {
       await sessions.save({ chatId, userId: telegramId, status: 'awaiting_first_name', draft: { rawText: '', fields: {} } });
       await sendMessage(chatId, tr(lang, 'thanks_first_name'));
     } else if (nxt === 'lastName') {
       await sessions.save({ chatId, userId: telegramId, status: 'awaiting_last_name', draft: { rawText: '', fields: {} } });
       await sendMessage(chatId, tr(lang, 'ask_last_name'));
-    } else if (nxt === 'gmail') {
-      await sessions.save({ chatId, userId: telegramId, status: 'awaiting_gmail', draft: { rawText: '', fields: {} } });
+    } else {
+      await sendMessage(chatId, tr(lang, 'greeting'));
     }
     return;
   }
@@ -325,6 +336,10 @@ async function handleProfileSetup(
   }
   if (session?.status === 'awaiting_first_name') {
     const pendingLang = session.draft.rawText ? (detectLang(session.draft.rawText) as 'az' | 'en') : lang;
+    if (text.startsWith('/')) {
+      await sendMessage(chatId, tr(pendingLang, 'ask_first_name'));
+      return;
+    }
     const parts = text.trim().split(/\s+/).filter(Boolean);
     if (parts.length >= 2 && parts.every(isValidName)) {
       await users.setNames(telegramId, parts[0], parts.slice(1).join(' '));
@@ -342,6 +357,10 @@ async function handleProfileSetup(
   }
   if (session?.status === 'awaiting_last_name') {
     const pendingLang = session.draft.rawText ? (detectLang(session.draft.rawText) as 'az' | 'en') : lang;
+    if (text.startsWith('/')) {
+      await sendMessage(chatId, tr(pendingLang, 'ask_last_name'));
+      return;
+    }
     const parts = text.trim().split(/\s+/).filter(Boolean);
     if (parts.length >= 2 && parts.every(isValidName)) {
       await users.setNames(telegramId, parts[0], parts.slice(1).join(' '));
