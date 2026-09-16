@@ -38,7 +38,6 @@ export interface ListRequest {
   category?: string;
 }
 
-/** "my tasks", "/list meetings", "siyahını göstər" → which items to show. Null = not a list request. */
 export function parseListRequest(text: string): ListRequest | null {
   const t = text.trim().toLowerCase();
   if (!t || t.length > 60) return null;
@@ -67,7 +66,6 @@ function lineFor(fields: Record<string, string>): string {
   return extras.length > 0 ? `${title} — ${extras.join(' ')}` : title;
 }
 
-/** All (or one category of) saved items, formatted for a Telegram message. */
 export async function listUserItems(userId: number, category?: string): Promise<string> {
   const items = await getItemStore().listByUser(userId);
   const wanted = category ? items.filter((item) => item.category === category) : items;

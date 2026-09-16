@@ -1,12 +1,25 @@
 import { env } from '../../config/env.js';
 import { getSupabase } from '../../infra/supabase/client.js';
 
-export type CaptureStatus = 'idle' | 'awaiting_gmail' | 'awaiting_first_name' | 'awaiting_last_name' | 'awaiting_category' | 'awaiting_field';
+export type CaptureStatus =
+  | 'idle'
+  | 'awaiting_gmail'
+  | 'awaiting_first_name'
+  | 'awaiting_last_name'
+  | 'awaiting_category'
+  | 'awaiting_field'
+  | 'awaiting_edit_pick'
+  | 'awaiting_edit_confirm'
+  | 'awaiting_edit_field'
+  | 'awaiting_edit_value';
 
 export interface Draft {
   rawText: string;
   category?: string;
   fields: Record<string, string>;
+  editId?: string;
+  editIds?: string[];
+  editField?: string;
 }
 
 export interface Session {

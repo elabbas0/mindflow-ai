@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { resolveDateField, todayBaku } from '../capture/dates.js';
 import type { ExtractedFields, ExtractionProvider } from './extraction.provider.js';
 
 const extractedSchema = z
@@ -15,15 +16,6 @@ const extractedSchema = z
   .passthrough();
 
 const KNOWN_KEYS = ['title', 'description', 'location', 'deadline', 'date', 'time'] as const;
-
-function todayBaku(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Baku',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
 
 function systemPrompt(): string {
   return `You extract structured fields from a short user message (Azerbaijani or English) for a personal organizer app.
@@ -47,11 +39,12 @@ function safeParse(raw: string): ExtractedFields | null {
       const value = parsed[key];
       if (typeof value === 'string' && value.trim()) out[key] = value.trim();
     }
-    // backward compat: old outputs used `notes` for meetings
     const notesVal = parsed['notes'];
     if (typeof notesVal === 'string' && notesVal.trim() && !out['description']) {
       out['description'] = notesVal.trim();
     }
+    if (out.date) out.date = resolveDateField(out.date);
+    if (out.deadline) out.deadline = resolveDateField(out.deadline);
     return out;
   } catch {
     return null;
@@ -64,7 +57,6 @@ export interface GeminiTextOptions {
   maxOutputTokens?: number;
 }
 
-/** Production extractor: Gemini Flash-Lite (free tier), JSON mode, one retry. */
 export class GeminiExtractionProvider implements ExtractionProvider {
   constructor(
     private apiKey: string,
@@ -86,7 +78,6 @@ export class GeminiExtractionProvider implements ExtractionProvider {
   }
 }
 
-/** Minimal Gemini generateContent call (free tier), shared by extraction and assistant. */
 export async function generateText(
   apiKey: string,
   model: string,

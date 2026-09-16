@@ -7,6 +7,7 @@ import { getSessionStore, type Session } from './session.store.js';
 import { getUserStore } from '../users/users.repository.js';
 import { listUserItems, parseListRequest } from './list-intent.js';
 import { CATEGORIES, CATEGORY_IDS, FIELD_LABELS, FIELD_ORDER, type CategoryId } from './category-fields.js';
+import { resolveDateField } from './dates.js';
 
 const GREETINGS = new Set(['salam', 'salam aleykum', 'salam aleyküm', 'salam aleykum', 'hello', 'hi', 'hey', 'saj', 'salamlar']);
 
@@ -28,10 +29,10 @@ const STR: Record<'en' | 'az', Record<string, string>> = {
     help: `Here's how I work:\n1. Send me anything (text or voice).\n2. Pick one of 4 categories.\n3. Answer my follow-up questions, one at a time.\n\nCommands:\n/start — start over\ncancel — stop what we're doing\n/list — show my saved items\n/help — show this message`,
     gmail_prompt: 'Welcome to MindFlow! Please share your gmail address to set up your account.',
     invalid_gmail: 'That does not look like a valid gmail address. Please try again.',
-    thanks_first_name: 'Thanks! What is your first name?',
-    ask_first_name: 'Please enter your first name.',
-    ask_last_name: 'And your last name?',
-    ask_last_name_please: 'Please enter your last name.',
+    thanks_first_name: 'Thanks! What is your full name? Write name and surname together, like "Aysel Mammadova".',
+    ask_first_name: 'Please enter your full name, name and surname together.',
+    ask_last_name: 'And your surname? (You can also write name and surname together.)',
+    ask_last_name_please: 'Please enter your surname.',
     voice_not_setup: 'Voice notes are not set up yet — please send text for now.',
     voice_error: 'Sorry, I could not hear that voice note. Please try again or send text.',
     cancelled: 'Cancelled. Send me anything to start over.',
@@ -39,15 +40,25 @@ const STR: Record<'en' | 'az', Record<string, string>> = {
     ask_field: 'Please enter the {field}.',
     saved_to: '✅ Saved to {label}',
     invalid_name: 'That doesn’t look like a valid name. Please enter your real name.',
+    edit_pick: 'Which one do you want to fix? Reply with the number.',
+    edit_none: 'You have no saved items yet.',
+    edit_confirm: 'Is this the right one?',
+    edit_yes: 'Yes, this one',
+    edit_no: 'No',
+    edit_which_field: 'Which field do you want to change? Reply with the number.',
+    edit_new_value: 'Write the new value for {field}.',
+    edit_done: '✅ Updated.',
+    edit_cancelled: 'OK, left it as is. Send me anything to start over.',
+    edit_bad_number: 'That number is not on the list. Try again.',
   },
   az: {
     greeting: `Salam! Mən MindFlow 🧠\nMənə istənilən şeyi göndərin — tapşırıq, görüş, layihə ideyası və ya qeyd — və mən onu sizin üçün təşkil edim.`,
     help: `Mən belə işləyirəm:\n1. Mənə istənilən şeyi (mətn və ya səs) göndərin.\n2. 4 kateqoriyadan birini seçin.\n3. Suallarıma bir-bir cavab verin.\n\nƏmrlər:\n/start — yenidən başla\ncancel — ləğv et\n/list — yadda saxlanılanları göstər\n/help — kömək`,
     gmail_prompt: 'MindFlow-a xoş gəldiniz! Hesabınızı qurmaq üçün gmail ünvanınızı göndərin.',
     invalid_gmail: 'Bu düzgün gmail ünvanı kimi görünmür. Zəhmət olmasa yenidən cəhd edin.',
-    thanks_first_name: 'Təşəkkürlər! Adınız nədir?',
-    ask_first_name: 'Zəhmət olmasa adınızı daxil edin.',
-    ask_last_name: 'Bəs soyadınız?',
+    thanks_first_name: 'Təşəkkürlər! Ad və soyadınızı birlikdə yazın, məsələn "Aysel Məmmədova".',
+    ask_first_name: 'Zəhmət olmasa ad və soyadınızı birlikdə yazın.',
+    ask_last_name: 'Bəs soyadınız? (Ad və soyadı birlikdə də yaza bilərsiniz.)',
     ask_last_name_please: 'Zəhmət olmasa soyadınızı daxil edin.',
     voice_not_setup: 'Səsli mesajlar hələ aktiv deyil — zəhmət olmasa mətn göndərin.',
     voice_error: 'Bağışlayın, səsli mesajı anlaya bilmədim. Zəhmət olmasa yenidən cəhd edin və ya mətn göndərin.',
@@ -56,6 +67,16 @@ const STR: Record<'en' | 'az', Record<string, string>> = {
     ask_field: 'Zəhmət olmasa {field} daxil edin.',
     saved_to: '✅ {label} yadda saxlanıldı',
     invalid_name: 'Bu ad kimi görünmür. Zəhmət olmasa əsl adınızı daxil edin.',
+    edit_pick: 'Hansı birini düzəltmək istəyirsiniz? Nömrəsini yazın.',
+    edit_none: 'Hələ yadda saxlanılan heç nə yoxdur.',
+    edit_confirm: 'Bu düzgündür?',
+    edit_yes: 'Bəli, budur',
+    edit_no: 'Xeyr',
+    edit_which_field: 'Hansı sahəni dəyişmək istəyirsiniz? Nömrəsini yazın.',
+    edit_new_value: '{field} üçün yeni dəyəri yazın.',
+    edit_done: '✅ Yeniləndi.',
+    edit_cancelled: 'Oldu, olduğu kimi qaldı. Yenidən başlamaq üçün nəsə göndərin.',
+    edit_bad_number: 'Bu nömrə siyahıda yoxdur. Yenidən cəhd edin.',
   },
 };
 
@@ -66,19 +87,42 @@ const FIELD_LABELS_I18N: Record<'en' | 'az', Record<string, string>> = {
 
 const CANCEL_WORDS = new Set(['cancel', '/cancel', 'stop', 'ləğv et', 'ləğv', 'legv et', 'legv', 'imtina']);
 
+const EDIT_WORDS = new Set([
+  '/edit',
+  'edit',
+  'düzəliş',
+  'duzelis',
+  'düzelt',
+  'redaktə',
+  'redakte',
+  'dəyiş',
+  'deyis',
+  'fix',
+  'correct',
+]);
+
 interface CallbackSelection {
   id: string;
   data?: string;
   chatId?: number;
 }
 
-/** PRD capture flow: remember the message, pick a category, fill missing fields one by one. */
 export async function handleCapture(update: TelegramUpdate): Promise<void> {
   if (update.callback_query) {
+    const data = update.callback_query.data ?? '';
+    const chatId = update.callback_query.message?.chat.id;
+    if (data.startsWith('edit:')) {
+      await handleEditCallback({
+        id: update.callback_query.id,
+        data,
+        chatId,
+      });
+      return;
+    }
     await handleCategoryChoice({
       id: update.callback_query.id,
-      data: update.callback_query.data,
-      chatId: update.callback_query.message?.chat.id,
+      data,
+      chatId,
     });
     return;
   }
@@ -184,6 +228,14 @@ async function handleTextMessage(chatId: number, telegramId: number, text: strin
     await sendMessage(chatId, tr(lang, 'help'));
     return;
   }
+  if (session && session.status.startsWith('awaiting_edit')) {
+    await handleEditAnswer(chatId, telegramId, session, text, lang);
+    return;
+  }
+  if (EDIT_WORDS.has(text.toLowerCase())) {
+    await startEdit(chatId, telegramId, lang);
+    return;
+  }
   if (isGreeting(text) && !session) {
     await sendMessage(chatId, tr(lang, 'greeting'));
     return;
@@ -205,7 +257,6 @@ async function handleTextMessage(chatId: number, telegramId: number, text: strin
   await startCapture(chatId, telegramId, text, lang);
 }
 
-/** PRD first-run setup + added name/surname step: completes profile before capture. */
 async function handleProfileSetup(
   chatId: number,
   telegramId: number,
@@ -274,51 +325,42 @@ async function handleProfileSetup(
   }
   if (session?.status === 'awaiting_first_name') {
     const pendingLang = session.draft.rawText ? (detectLang(session.draft.rawText) as 'az' | 'en') : lang;
-    if (!text || !isValidName(text)) {
-      await sendMessage(chatId, text && isGreeting(text) ? tr(pendingLang, 'ask_first_name') : tr(pendingLang, 'invalid_name'));
+    const parts = text.trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 2 && parts.every(isValidName)) {
+      await users.setNames(telegramId, parts[0], parts.slice(1).join(' '));
+      await resumeAfterProfile(chatId, telegramId, session.draft.rawText, pendingLang);
       return;
     }
-    const maybeLast = text.trim().split(/\s+/);
-    if (maybeLast.length >= 2) {
-      if (!maybeLast.every(isValidName)) {
-        await sendMessage(chatId, tr(pendingLang, 'invalid_name'));
-        return;
-      }
-      await users.setNames(telegramId, maybeLast[0], maybeLast.slice(1).join(' '));
-      const pending2 = session.draft.rawText;
-      const useLang = pending2 ? (detectLang(pending2) as 'az' | 'en') : pendingLang;
-      if (pending2) {
-        if (isGreeting(pending2)) {
-          await sessions.clear(chatId);
-          await sendMessage(chatId, tr(useLang, 'greeting'));
-        } else {
-          await startCapture(chatId, telegramId, pending2, useLang);
-        }
-      } else { await sessions.clear(chatId); await sendMessage(chatId, tr(useLang, 'greeting')); }
+    if (parts.length === 1 && isValidName(parts[0])) {
+      await users.setFirstName(telegramId, parts[0]);
+      await sessions.save({ chatId, userId: telegramId, status: 'awaiting_last_name', draft: session.draft });
+      await sendMessage(chatId, tr(pendingLang, 'ask_last_name'));
       return;
     }
-    await users.setFirstName(telegramId, text.trim());
-    await sessions.save({ chatId, userId: telegramId, status: 'awaiting_last_name', draft: session.draft });
-    await sendMessage(chatId, tr(pendingLang, 'ask_last_name'));
+    await sendMessage(chatId, tr(pendingLang, 'invalid_name'));
     return;
   }
   if (session?.status === 'awaiting_last_name') {
     const pendingLang = session.draft.rawText ? (detectLang(session.draft.rawText) as 'az' | 'en') : lang;
-    if (!text || !isValidName(text)) {
-      await sendMessage(chatId, tr(pendingLang, 'ask_last_name_please'));
+    const parts = text.trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 2 && parts.every(isValidName)) {
+      await users.setNames(telegramId, parts[0], parts.slice(1).join(' '));
+      await resumeAfterProfile(chatId, telegramId, session.draft.rawText, pendingLang);
       return;
     }
-    await users.setLastName(telegramId, text.trim());
-    const pending3 = session.draft.rawText;
-    const useLang = pending3 ? (detectLang(pending3) as 'az' | 'en') : pendingLang;
-    if (pending3) {
-      if (isGreeting(pending3)) {
-        await sessions.clear(chatId);
-        await sendMessage(chatId, tr(useLang, 'greeting'));
-      } else {
-        await startCapture(chatId, telegramId, pending3, useLang);
+    if (parts.length === 1 && isValidName(parts[0])) {
+      const current = await users.find(telegramId);
+      if (!current?.firstName) {
+        await users.setFirstName(telegramId, parts[0]);
+        await sessions.save({ chatId, userId: telegramId, status: 'awaiting_last_name', draft: session.draft });
+        await sendMessage(chatId, tr(pendingLang, 'ask_last_name'));
+        return;
       }
-    } else { await sessions.clear(chatId); await sendMessage(chatId, tr(useLang, 'greeting')); }
+      await users.setLastName(telegramId, parts[0]);
+      await resumeAfterProfile(chatId, telegramId, session.draft.rawText, pendingLang);
+      return;
+    }
+    await sendMessage(chatId, tr(pendingLang, 'ask_last_name_please'));
     return;
   }
 
@@ -372,11 +414,32 @@ function normalizeFields(fields: Record<string, string>): Record<string, string>
   return fields;
 }
 
-/** Ask the next missing field, or save when everything is complete. */
+async function resumeAfterProfile(chatId: number, telegramId: number, pending: string, lang: 'az' | 'en'): Promise<void> {
+  const sessions = getSessionStore();
+  if (pending) {
+    if (isGreeting(pending)) {
+      await sessions.clear(chatId);
+      await sendMessage(chatId, tr(lang, 'greeting'));
+    } else {
+      await startCapture(chatId, telegramId, pending, lang);
+    }
+  } else {
+    await sessions.clear(chatId);
+    await sendMessage(chatId, tr(lang, 'greeting'));
+  }
+}
+
+function resolveDateFields(fields: Record<string, string>): Record<string, string> {
+  const out = { ...fields };
+  if (out.date) out.date = resolveDateField(out.date);
+  if (out.deadline) out.deadline = resolveDateField(out.deadline);
+  return out;
+}
+
 async function continueCapture(chatId: number, session: Session, lang: 'az' | 'en' = 'en'): Promise<void> {
   const category = session.draft.category as CategoryId;
   const order = FIELD_ORDER[category] ?? [];
-  const normalized = normalizeFields(session.draft.fields);
+  const normalized = resolveDateFields(normalizeFields(session.draft.fields));
   const missing = order.find((name) => !normalized[name]?.trim());
   const sessions = getSessionStore();
 
@@ -388,7 +451,6 @@ async function continueCapture(chatId: number, session: Session, lang: 'az' | 'e
     await sendMessage(chatId, formatSavedItem(category, toSave, lang));
     return;
   }
-  // persist normalized so old `notes` counts as `description` going forward
   const nextSession = normalized !== session.draft.fields ? { ...session, draft: { ...session.draft, fields: normalized } } : session;
   await sessions.save({ ...nextSession, status: 'awaiting_field', pendingField: missing });
   await sendMessage(chatId, tr(lang, 'ask_field', { field: fieldLabel(lang, missing) }));
@@ -454,6 +516,185 @@ async function handleFieldAnswer(chatId: number, session: Session, text: string,
   for (const [key, value] of Object.entries(found)) {
     if (value && !fields[key]) fields[key] = value;
   }
-  if (!fields[field]) fields[field] = text;
+  if (!fields[field]) {
+    fields[field] = field === 'date' || field === 'deadline' ? resolveDateField(text) : text;
+  } else if (fields[field] && (field === 'date' || field === 'deadline')) {
+    fields[field] = resolveDateField(fields[field]);
+  }
   await continueCapture(chatId, { ...session, draft: { ...session.draft, fields } }, lang);
+}
+
+function shortTitle(fields: Record<string, string>): string {
+  return fields.title || fields.description || fields.notes || 'Untitled';
+}
+
+async function startEdit(chatId: number, telegramId: number, lang: 'az' | 'en'): Promise<void> {
+  const items = await getItemStore().listByUser(telegramId);
+  if (items.length === 0) {
+    await sendMessage(chatId, tr(lang, 'edit_none'));
+    return;
+  }
+  const picked = items.slice(0, 10);
+  const lines = picked.map((item, i) => `${i + 1}. [${item.category}] ${shortTitle(item.fields)}`);
+  await getSessionStore().save({
+    chatId,
+    userId: telegramId,
+    status: 'awaiting_edit_pick',
+    draft: { rawText: '', fields: {}, editIds: picked.map((item) => item.id) },
+  });
+  await sendMessage(chatId, `${tr(lang, 'edit_pick')}\n${lines.join('\n')}`);
+}
+
+async function askEditConfirm(chatId: number, telegramId: number, itemId: string, lang: 'az' | 'en'): Promise<void> {
+  const item = await getItemStore().getById(itemId);
+  if (!item || item.userId !== telegramId) {
+    await getSessionStore().clear(chatId);
+    await sendMessage(chatId, tr(lang, 'edit_none'));
+    return;
+  }
+  await getSessionStore().save({
+    chatId,
+    userId: telegramId,
+    status: 'awaiting_edit_confirm',
+    draft: { rawText: '', fields: {}, editId: item.id },
+  });
+  await sendMessage(
+    chatId,
+    `${tr(lang, 'edit_confirm')}\n[${item.category}] ${shortTitle(item.fields)}\n${formatSavedItem(item.category, item.fields, lang)}`,
+    [
+      [
+        { text: tr(lang, 'edit_yes'), callback_data: 'edit:yes' },
+        { text: tr(lang, 'edit_no'), callback_data: 'edit:no' },
+      ],
+    ],
+  );
+}
+
+async function askEditField(chatId: number, telegramId: number, itemId: string, lang: 'az' | 'en'): Promise<void> {
+  const item = await getItemStore().getById(itemId);
+  if (!item || item.userId !== telegramId) {
+    await getSessionStore().clear(chatId);
+    await sendMessage(chatId, tr(lang, 'edit_none'));
+    return;
+  }
+  const order = FIELD_ORDER[item.category as CategoryId] ?? Object.keys(item.fields);
+  const lines = order.map((name, i) => `${i + 1}. ${fieldLabel(lang, name)}: ${item.fields[name] ?? '—'}`);
+  await getSessionStore().save({
+    chatId,
+    userId: telegramId,
+    status: 'awaiting_edit_field',
+    draft: { rawText: '', fields: {}, editId: item.id },
+  });
+  await sendMessage(chatId, `${tr(lang, 'edit_which_field')}\n${lines.join('\n')}`);
+}
+
+async function handleEditCallback(query: CallbackSelection): Promise<void> {
+  if (query.chatId === undefined) return;
+  await answerCallbackQuery(query.id);
+  const data = query.data ?? '';
+  const session = await getSessionStore().get(query.chatId);
+  if (!session) return;
+  const lang: 'az' | 'en' = 'az';
+
+  if (data === 'edit:yes' && session.status === 'awaiting_edit_confirm' && session.draft.editId) {
+    await askEditField(query.chatId, session.userId, session.draft.editId, lang);
+    return;
+  }
+  if (data === 'edit:no') {
+    await getSessionStore().clear(query.chatId);
+    await sendMessage(query.chatId, tr(lang, 'edit_cancelled'));
+    return;
+  }
+}
+
+async function handleEditAnswer(chatId: number, telegramId: number, session: Session, text: string, lang: 'az' | 'en'): Promise<void> {
+  const store = getItemStore();
+  const sessions = getSessionStore();
+
+  if (CANCEL_WORDS.has(text.toLowerCase())) {
+    await sessions.clear(chatId);
+    await sendMessage(chatId, tr(lang, 'cancelled'));
+    return;
+  }
+
+  if (session.status === 'awaiting_edit_pick') {
+    const n = Number(text.trim());
+    const ids = session.draft.editIds ?? [];
+    if (!Number.isInteger(n) || n < 1 || n > ids.length) {
+      await sendMessage(chatId, tr(lang, 'edit_bad_number'));
+      return;
+    }
+    await askEditConfirm(chatId, telegramId, ids[n - 1], lang);
+    return;
+  }
+
+  if (session.status === 'awaiting_edit_confirm') {
+    const t = text.trim().toLowerCase();
+    if (['yes', 'y', 'bəli', 'beli', 'hə', 'he'].includes(t)) {
+      if (session.draft.editId) await askEditField(chatId, telegramId, session.draft.editId, lang);
+      return;
+    }
+    if (['no', 'n', 'xeyr', 'yox'].includes(t)) {
+      await sessions.clear(chatId);
+      await sendMessage(chatId, tr(lang, 'edit_cancelled'));
+      return;
+    }
+    if (session.draft.editId) {
+      await askEditConfirm(chatId, telegramId, session.draft.editId, lang);
+    }
+    return;
+  }
+
+  if (session.status === 'awaiting_edit_field') {
+    const item = session.draft.editId ? await store.getById(session.draft.editId) : null;
+    if (!item || item.userId !== telegramId) {
+      await sessions.clear(chatId);
+      await sendMessage(chatId, tr(lang, 'edit_none'));
+      return;
+    }
+    const order = FIELD_ORDER[item.category as CategoryId] ?? Object.keys(item.fields);
+    const n = Number(text.trim());
+    let field = '';
+    if (Number.isInteger(n) && n >= 1 && n <= order.length) {
+      field = order[n - 1];
+    } else {
+      const lowered = text.trim().toLowerCase();
+      field = order.find((name) => name.toLowerCase() === lowered || fieldLabel(lang, name).toLowerCase() === lowered) ?? '';
+    }
+    if (!field) {
+      await sendMessage(chatId, tr(lang, 'edit_bad_number'));
+      return;
+    }
+    await sessions.save({
+      chatId,
+      userId: telegramId,
+      status: 'awaiting_edit_value',
+      draft: { rawText: '', fields: {}, editId: item.id, editField: field },
+    });
+    await sendMessage(chatId, tr(lang, 'edit_new_value', { field: fieldLabel(lang, field) }));
+    return;
+  }
+
+  if (session.status === 'awaiting_edit_value') {
+    const item = session.draft.editId ? await store.getById(session.draft.editId) : null;
+    const field = session.draft.editField;
+    if (!item || item.userId !== telegramId || !field) {
+      await sessions.clear(chatId);
+      await sendMessage(chatId, tr(lang, 'edit_none'));
+      return;
+    }
+    const value = field === 'date' || field === 'deadline' ? resolveDateField(text.trim()) : text.trim();
+    if (!value) {
+      await sendMessage(chatId, tr(lang, 'edit_bad_number'));
+      return;
+    }
+    const updated = await store.update(item.id, { fields: { [field]: value } });
+    await sessions.clear(chatId);
+    if (!updated) {
+      await sendMessage(chatId, tr(lang, 'edit_none'));
+      return;
+    }
+    await sendMessage(chatId, `${tr(lang, 'edit_done')}\n${formatSavedItem(updated.category, updated.fields, lang)}`);
+    return;
+  }
 }

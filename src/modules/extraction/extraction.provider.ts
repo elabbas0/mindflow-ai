@@ -1,4 +1,5 @@
 import { env } from '../../config/env.js';
+import { resolveDateString } from '../capture/dates.js';
 import { GeminiExtractionProvider } from './gemini.provider.js';
 
 export interface ExtractedFields {
@@ -30,7 +31,6 @@ const AZ_MONTHS = [
   'dekabr',
 ];
 
-/** Placeholder until the Gemini provider lands: Azerbaijani date/time regexes. */
 class StubExtractionProvider implements ExtractionProvider {
   async extract(text: string): Promise<ExtractedFields> {
     const t = text.trim();
@@ -44,18 +44,23 @@ class StubExtractionProvider implements ExtractionProvider {
       if (h) out.time = `${h[1].padStart(2, '0')}:00`;
     }
 
-    const dm = t.match(new RegExp(`(\\d{1,2})\\s+(${AZ_MONTHS.join('|')})`, 'i'));
-    if (dm) {
-      out.date = `${dm[1]} ${dm[2].toLowerCase()}`;
-    } else if (/\bsabah\b/i.test(t)) {
-      out.date = 'sabah';
-    } else if (/\bbu\s*gün\b|\bbugün\b/i.test(t)) {
-      out.date = 'bugün';
+    const iso = resolveDateString(t);
+    if (iso) {
+      out.date = iso;
+      out.deadline = iso;
+    } else {
+      const dm = t.match(new RegExp(`(\\d{1,2})\\s+(${AZ_MONTHS.join('|')})`, 'i'));
+      if (dm) {
+        const resolved = resolveDateString(dm[0]);
+        if (resolved) {
+          out.date = resolved;
+          out.deadline = resolved;
+        }
+      }
     }
 
     const first = t.split(/[.!?\n]/)[0].trim();
     if (first) out.title = first.slice(0, 80);
-    // description/notes/location/deadline need a real model (lands with Gemini).
     return out;
   }
 }

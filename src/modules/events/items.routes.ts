@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { CATEGORIES, CATEGORY_IDS, FIELD_LABELS, FIELD_ORDER } from '../capture/category-fields.js';
+import { CATEGORIES, CATEGORY_IDS, FIELD_ORDER, FIELD_LABELS } from '../capture/category-fields.js';
+import { resolveDateField } from '../capture/dates.js';
 import { findUser } from '../users/identify.js';
-import { getItemStore, type ItemRecord } from './items.repository.js';
+import { getItemStore } from './items.repository.js';
 
 const itemJson = {
   type: 'object',
@@ -15,13 +16,11 @@ const itemJson = {
 
 const notFoundSchema = { type: 'object', properties: { ok: { type: 'boolean' }, error: { type: 'string' } } };
 
-function toJson(item: ItemRecord): { id: string; category: string; fields: Record<string, string> } {
+function toJson(item: { id: string; category: string; fields: Record<string, string> }): { id: string; category: string; fields: Record<string, string> } {
   return { id: item.id, category: item.category, fields: item.fields };
 }
 
-async function scopedUser(query: { telegramId?: number; gmail?: string }): Promise<
-  { telegramId: number } | null
-> {
+async function scopedUser(query: { telegramId?: number; gmail?: string }): Promise<{ telegramId: number } | null> {
   const user = await findUser(query.telegramId, query.gmail);
   return user ? { telegramId: user.telegramId } : null;
 }
@@ -57,7 +56,12 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
     },
     async () => ({
       ok: true,
-      categories: CATEGORIES.map((c) => ({ id: c.id, label: c.label, order: FIELD_ORDER[c.id], labels: FIELD_LABELS })),
+      categories: CATEGORIES.map((c) => ({
+        id: c.id,
+        label: c.label,
+        order: FIELD_ORDER[c.id],
+        labels: FIELD_LABELS,
+      })),
     }),
   );
 
@@ -66,7 +70,7 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
     {
       schema: {
         tags: ['items'],
-        summary: 'List a user’s saved items, optionally filtered by category',
+        summary: 'List a user saved items, optionally filtered by category',
         querystring: {
           type: 'object',
           properties: {
@@ -172,11 +176,10 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
       if (missing.length > 0) {
         return reply.code(400).send({ ok: false, error: 'Missing required fields.', missing });
       }
-      const item = await getItemStore().save({
-        userId: scoped.telegramId,
-        category: parsed.data.category,
-        fields: parsed.data.fields,
-      });
+      const fields = { ...parsed.data.fields };
+      if (fields.date) fields.date = resolveDateField(fields.date);
+      if (fields.deadline) fields.deadline = resolveDateField(fields.deadline);
+      const item = await getItemStore().save({ userId: scoped.telegramId, category: parsed.data.category, fields });
       return reply.code(201).send({ ok: true, item: toJson(item) });
     },
   );
@@ -186,7 +189,7 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
     {
       schema: {
         tags: ['items'],
-        summary: 'Edit a saved item (owner only, partial fields allowed)',
+        summary: 'Edit a saved item (owner only, partial fields). Confirm flow: GET the item first, show it, then PATCH.',
         body: {
           type: 'object',
           properties: {
@@ -214,6 +217,9 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
         })
         .safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ ok: false, error: 'Invalid body.' });
+      if (parsed.data.category === undefined && parsed.data.fields === undefined) {
+        return reply.code(400).send({ ok: false, error: 'Nothing to update.' });
+      }
       const scoped = await scopedUser(parsed.data);
       if (!scoped) return reply.code(404).send({ ok: false, error: 'User not found.' });
       if (parsed.data.category !== undefined && !CATEGORY_IDS.has(parsed.data.category)) {
@@ -224,8 +230,79 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
       if (!existing || existing.userId !== scoped.telegramId) {
         return reply.code(404).send({ ok: false, error: 'Item not found.' });
       }
-      const updated = await store.update(params.id, { category: parsed.data.category, fields: parsed.data.fields });
-      return reply.send({ ok: true, item: toJson(updated as ItemRecord) });
+      const patch: { category?: string; fields?: Record<string, string> } = {};
+      if (parsed.data.category !== undefined) patch.category = parsed.data.category;
+      if (parsed.data.fields !== undefined) {
+        const merged = { ...existing.fields, ...parsed.data.fields };
+        if (merged.date) merged.date = resolveDateField(merged.date);
+        if (merged.deadline) merged.deadline = resolveDateField(merged.deadline);
+        if (merged.description && merged.notes) delete merged.notes;
+        patch.fields = merged;
+      }
+      const updated = await store.update(params.id, patch);
+      if (!updated) return reply.code(404).send({ ok: false, error: 'Item not found.' });
+      return reply.send({ ok: true, item: toJson(updated) });
+    },
+  );
+
+  app.put(
+    '/api/items/:id',
+    {
+      schema: {
+        tags: ['items'],
+        summary: 'Replace a saved item (owner only, full fields). Confirm flow: GET the item first, show it, then PUT.',
+        body: {
+          type: 'object',
+          required: ['category', 'fields'],
+          properties: {
+            telegramId: { type: 'number' },
+            gmail: { type: 'string' },
+            category: { type: 'string' },
+            fields: { type: 'object', additionalProperties: { type: 'string' } },
+          },
+        },
+        response: {
+          200: { type: 'object', properties: { ok: { type: 'boolean' }, item: itemJson } },
+          400: {
+            type: 'object',
+            properties: { ok: { type: 'boolean' }, error: { type: 'string' }, missing: { type: 'array', items: { type: 'string' } } },
+          },
+          404: notFoundSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const params = req.params as { id: string };
+      const parsed = z
+        .object({
+          telegramId: z.number().optional(),
+          gmail: z.string().optional(),
+          category: z.string(),
+          fields: z.record(z.string()),
+        })
+        .safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ ok: false, error: 'category and fields are required.' });
+      const scoped = await scopedUser(parsed.data);
+      if (!scoped) return reply.code(404).send({ ok: false, error: 'User not found.' });
+      if (!CATEGORY_IDS.has(parsed.data.category)) {
+        return reply.code(400).send({ ok: false, error: `Unknown category: ${parsed.data.category}.` });
+      }
+      const order = FIELD_ORDER[parsed.data.category as keyof typeof FIELD_ORDER];
+      const missing = order.filter((name) => !parsed.data.fields[name]?.trim());
+      if (missing.length > 0) {
+        return reply.code(400).send({ ok: false, error: 'Missing required fields.', missing });
+      }
+      const store = getItemStore();
+      const existing = await store.getById(params.id);
+      if (!existing || existing.userId !== scoped.telegramId) {
+        return reply.code(404).send({ ok: false, error: 'Item not found.' });
+      }
+      const fields = { ...parsed.data.fields };
+      if (fields.date) fields.date = resolveDateField(fields.date);
+      if (fields.deadline) fields.deadline = resolveDateField(fields.deadline);
+      const updated = await store.update(params.id, { category: parsed.data.category, fields });
+      if (!updated) return reply.code(404).send({ ok: false, error: 'Item not found.' });
+      return reply.send({ ok: true, item: toJson(updated) });
     },
   );
 
