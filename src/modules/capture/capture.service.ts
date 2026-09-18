@@ -16,11 +16,122 @@ function isGreeting(text: string): boolean {
   return GREETINGS.has(t) || /^salam\b/i.test(t);
 }
 
-function detectLang(text: string): 'az' | 'en' {
+// Azerbaijani stems: only Azerbaijani suffixes may follow, so "sabahdan"
+// and "görüşlərim" count while English lookalikes ("variable", "send") don't.
+const AZ_SUFFIX =
+  '(?:dan|dən|den|tan|tən|lar|lər|ler|da|də|de|nın|nin|nun|nün|ın|in|un|ün|ım|im|um|üm|ya|yə|yı|yi|yu|yü|nı|ni|nu|nü|dır|dir|dur|dür|sınız|siniz|sunuz|sünüz)*';
+const AZ_STEMS = [
+  'salam',
+  'sabah',
+  'bugun',
+  'bugün',
+  'sragagun',
+  'sırağa',
+  'hansi',
+  'hansı',
+  'nece',
+  'necə',
+  'ne',
+  'nə',
+  'gorus',
+  'görüş',
+  'tapsiriq',
+  'tapşırıq',
+  'tapshiriq',
+  'layihe',
+  'layihə',
+  'proyekt',
+  'qeyd',
+  'tesekkur',
+  'təşəkkür',
+  'xahis',
+  'xahiş',
+  'zahmet',
+  'zəhmət',
+  'ad',
+  'soyad',
+  'axsam',
+  'axşam',
+  'gun',
+  'gün',
+  'tarix',
+  'vaxt',
+  'mekan',
+  'məkan',
+  'men',
+  'mən',
+  'menim',
+  'mənim',
+  'sen',
+  'sən',
+  'biz',
+  'siz',
+  'var',
+  'yox',
+  'deyil',
+  'üçün',
+  'ucun',
+  'cün',
+  'çün',
+  'ile',
+  'ilə',
+  'kimi',
+  'qeder',
+  'qədər',
+  'sonra',
+  'evvel',
+  'əvvəl',
+  'bele',
+  'belə',
+  'hec',
+  'heç',
+  'cox',
+  'çox',
+  'yeni',
+  'lazim',
+  'lazım',
+  'gerek',
+  'gərək',
+  'olar',
+  'olmaz',
+  'necesen',
+  'necəsən',
+  'sagol',
+  'sağol',
+  'buyur',
+  'goster',
+  'göstər',
+  'hamisi',
+  'hamısı',
+  'görə',
+  'gore',
+  'ki',
+  'cunki',
+  'çünki',
+];
+const AZ_RE = new RegExp(`\\b(?:${AZ_STEMS.join('|')})${AZ_SUFFIX}\\b`);
+const EN_RE =
+  /\b(the|and|what|how|my|your|today|tomorrow|meeting|meetings|task|tasks|todo|todos|project|projects|note|notes|list|show|from|starting|since|after|have|has|are|is|do|does|will|would|want|need|please|thanks|thank)\b/i;
+
+/**
+ * 'az' when the message carries Azerbaijani markers, 'en' for English ones,
+ * null when neutral (commands, numbers, names, dates).
+ */
+export function detectMarkers(text: string): 'az' | 'en' | null {
   const lower = text.toLowerCase();
   if (/[əğıöşüç]/.test(lower)) return 'az';
-  if (/\b(salam|təşəkkür|tesekkur|xahiş|zahmet|zəhmət|sabah|axşam|axsam|bugün|bu gun|adım|adim|soyad|siyahı|siyahi|tapşırıq|tapsiriq|lazım|lazim|görüş|gorus|layihə|layihe|qeyd|vaxt|tarix|məkan|mekan)\b/i.test(lower)) return 'az';
-  return 'en';
+  if (AZ_RE.test(lower)) return 'az';
+  if (EN_RE.test(lower)) return 'en';
+  return null;
+}
+
+/** Sticky language: a marked message switches it, neutral ones keep the stored one. */
+export function resolveLang(
+  text: string,
+  stored: 'az' | 'en' | null,
+  tgLang: 'az' | null = null,
+): 'az' | 'en' {
+  return detectMarkers(text) ?? stored ?? tgLang ?? 'en';
 }
 
 const STR: Record<'en' | 'az', Record<string, string>> = {
@@ -131,28 +242,31 @@ export async function handleCapture(update: TelegramUpdate): Promise<void> {
   if (!message) return;
   const chatId = message.chat.id;
   const telegramId = message.from?.id ?? chatId;
+  const tgLang: 'az' | null =
+    message.from?.language_code?.toLowerCase().startsWith('az') ? 'az' : null;
 
   if (message.voice) {
+    const voiceLang = (await getUserStore().find(telegramId))?.lang ?? tgLang ?? 'en';
     if (!isVoiceConfigured()) {
-      await sendMessage(chatId, tr('en', 'voice_not_setup'));
+      await sendMessage(chatId, tr(voiceLang, 'voice_not_setup'));
       return;
     }
     let transcript: string;
     try {
       transcript = (await transcribeTelegramVoice(message.voice.file_id)).trim();
     } catch {
-      await sendMessage(chatId, tr('en', 'voice_error'));
+      await sendMessage(chatId, tr(voiceLang, 'voice_error'));
       return;
     }
     if (!transcript) {
-      await sendMessage(chatId, tr('en', 'voice_error'));
+      await sendMessage(chatId, tr(voiceLang, 'voice_error'));
       return;
     }
-    await handleTextMessage(chatId, telegramId, transcript);
+    await handleTextMessage(chatId, telegramId, transcript, tgLang);
     return;
   }
 
-  await handleTextMessage(chatId, telegramId, (message.text ?? '').trim());
+  await handleTextMessage(chatId, telegramId, (message.text ?? '').trim(), tgLang);
 }
 
 function isValidGmail(text: string): boolean {
@@ -205,12 +319,22 @@ function needsProfile(user: { gmail: string | null; firstName: string | null; la
   return !!nextOnboardingStep(user);
 }
 
-async function handleTextMessage(chatId: number, telegramId: number, text: string): Promise<void> {
+async function handleTextMessage(
+  chatId: number,
+  telegramId: number,
+  text: string,
+  tgLang: 'az' | null = null,
+): Promise<void> {
   const users = getUserStore();
   const sessions = getSessionStore();
   const { user } = await users.getOrCreate(telegramId);
   const session = await sessions.get(chatId);
-  const lang = detectLang(text) as 'az' | 'en';
+  // Sticky language: a marked message sets it, neutral ones keep it.
+  const marked = detectMarkers(text);
+  const lang = marked ?? user.lang ?? tgLang ?? 'en';
+  if (marked && marked !== user.lang) {
+    await users.setLang(telegramId, marked);
+  }
 
   if (needsProfile(user) || (session && ['awaiting_gmail', 'awaiting_first_name', 'awaiting_last_name'].includes(session.status))) {
     await handleProfileSetup(chatId, telegramId, session, text, lang);
@@ -248,7 +372,7 @@ async function handleTextMessage(chatId: number, telegramId: number, text: strin
   }
   const listReq = parseListRequest(text);
   if (listReq) {
-    await sendMessage(chatId, await listUserItems(telegramId, listReq.category, listReq.fromDate));
+    await sendMessage(chatId, await listUserItems(telegramId, listReq.category, listReq.fromDate, lang));
     if (session && session.status === 'awaiting_field' && session.pendingField) {
       await sendMessage(chatId, tr(lang, 'ask_field', { field: fieldLabel(lang, session.pendingField) }));
     }
@@ -308,7 +432,7 @@ async function handleProfileSetup(
     }
     await users.setGmail(telegramId, text);
     const pending = session.draft.rawText;
-    const pendingLang = pending ? (detectLang(pending) as 'az' | 'en') : lang;
+    const pendingLang = pending ? (detectMarkers(pending) ?? lang) : lang;
     const updated = await users.find(telegramId);
     const next = nextOnboardingStep(updated ?? { gmail: text, firstName: null, lastName: null });
     if (next === 'firstName') {
@@ -335,7 +459,7 @@ async function handleProfileSetup(
     return;
   }
   if (session?.status === 'awaiting_first_name') {
-    const pendingLang = session.draft.rawText ? (detectLang(session.draft.rawText) as 'az' | 'en') : lang;
+    const pendingLang = session.draft.rawText ? (detectMarkers(session.draft.rawText) ?? lang) : lang;
     if (text.startsWith('/')) {
       await sendMessage(chatId, tr(pendingLang, 'ask_first_name'));
       return;
@@ -356,7 +480,7 @@ async function handleProfileSetup(
     return;
   }
   if (session?.status === 'awaiting_last_name') {
-    const pendingLang = session.draft.rawText ? (detectLang(session.draft.rawText) as 'az' | 'en') : lang;
+    const pendingLang = session.draft.rawText ? (detectMarkers(session.draft.rawText) ?? lang) : lang;
     if (text.startsWith('/')) {
       await sendMessage(chatId, tr(pendingLang, 'ask_last_name'));
       return;
@@ -510,7 +634,8 @@ async function handleCategoryChoice(query: CallbackSelection): Promise<void> {
   for (const [key, value] of Object.entries(found)) {
     if (value) fields[key] = value;
   }
-  const lang = detectLang(session.draft.rawText) as 'az' | 'en';
+  const stored = (await getUserStore().find(session.userId))?.lang ?? null;
+  const lang = detectMarkers(session.draft.rawText) ?? stored ?? 'en';
   await continueCapture(query.chatId, {
     ...session,
     status: 'awaiting_field',
@@ -613,7 +738,7 @@ async function handleEditCallback(query: CallbackSelection): Promise<void> {
   const data = query.data ?? '';
   const session = await getSessionStore().get(query.chatId);
   if (!session) return;
-  const lang: 'az' | 'en' = 'az';
+  const lang = (await getUserStore().find(session.userId))?.lang ?? 'en';
 
   if (data === 'edit:yes' && session.status === 'awaiting_edit_confirm' && session.draft.editId) {
     await askEditField(query.chatId, session.userId, session.draft.editId, lang);

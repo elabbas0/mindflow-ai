@@ -10,6 +10,7 @@ const userJson = {
     gmail: { type: ['string', 'null'] },
     firstName: { type: ['string', 'null'] },
     lastName: { type: ['string', 'null'] },
+    lang: { type: ['string', 'null'] },
   },
 };
 
@@ -52,6 +53,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
             gmail: { type: 'string' },
             firstName: { type: 'string' },
             lastName: { type: 'string' },
+            lang: { type: 'string', enum: ['az', 'en'] },
           },
         },
         response: {
@@ -74,6 +76,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
           gmail: z.string().optional(),
           firstName: z.string().optional(),
           lastName: z.string().optional(),
+          lang: z.enum(['az', 'en']).optional(),
         })
         .safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ ok: false, error: 'telegramId is required.' });
@@ -87,6 +90,9 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
         const firstName = parsed.data.firstName ?? current.firstName ?? '';
         const lastName = parsed.data.lastName ?? current.lastName ?? '';
         if (firstName || lastName) current = await store.setNames(parsed.data.telegramId, firstName, lastName);
+      }
+      if (parsed.data.lang && parsed.data.lang !== current.lang) {
+        current = await store.setLang(parsed.data.telegramId, parsed.data.lang);
       }
       return reply.send({ ok: true, user: current, created: isNew });
     },

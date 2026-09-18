@@ -101,7 +101,12 @@ export function itemDate(fields: Record<string, string>): string | null {
   return m ? m[1] : null;
 }
 
-export async function listUserItems(userId: number, category?: string, fromDate?: string): Promise<string> {
+export async function listUserItems(
+  userId: number,
+  category?: string,
+  fromDate?: string,
+  lang: 'az' | 'en' = 'en',
+): Promise<string> {
   const items = await getItemStore().listByUser(userId);
   const wanted = items.filter((item) => {
     if (category && item.category !== category) return false;
@@ -113,8 +118,14 @@ export async function listUserItems(userId: number, category?: string, fromDate?
     return true;
   });
   if (wanted.length === 0) {
-    if (fromDate) return `No saved items from ${fromDate} onward yet. Send me something first!`;
-    return 'You have no saved items yet. Send me something first!';
+    if (fromDate) {
+      return lang === 'az'
+        ? `${fromDate} tarixindən sonra yadda saxlanılan heç nə yoxdur. İlk öncə mənə nəsə göndərin!`
+        : `No saved items from ${fromDate} onward yet. Send me something first!`;
+    }
+    return lang === 'az'
+      ? 'Hələ yadda saxlanılan heç nə yoxdur. İlk öncə mənə nəsə göndərin!'
+      : 'You have no saved items yet. Send me something first!';
   }
 
   const byCategory = new Map<string, ItemRecord[]>();

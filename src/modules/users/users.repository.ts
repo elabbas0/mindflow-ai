@@ -6,6 +6,7 @@ export interface UserRecord {
   gmail: string | null;
   firstName: string | null;
   lastName: string | null;
+  lang: 'az' | 'en' | null;
 }
 
 export interface UserStore {
@@ -16,9 +17,22 @@ export interface UserStore {
   setNames(telegramId: number, firstName: string, lastName: string): Promise<UserRecord>;
   setFirstName(telegramId: number, firstName: string): Promise<UserRecord>;
   setLastName(telegramId: number, lastName: string): Promise<UserRecord>;
+  setLang(telegramId: number, lang: 'az' | 'en'): Promise<UserRecord>;
 }
 
 export let namesColumnExists = true;
+export let langColumnExists = true;
+
+function isMissingLangColumn(err: unknown): boolean {
+  const msg = (err as { message?: string })?.message ?? String(err ?? '');
+  return /\blang\b/i.test(msg) && /does not exist|Could not find/i.test(msg);
+}
+
+function userColumns(): string {
+  return langColumnExists
+    ? 'telegram_id, gmail, first_name, last_name, lang'
+    : 'telegram_id, gmail, first_name, last_name';
+}
 
 function isMissingNamesColumn(err: unknown): boolean {
   const msg = (err as { message?: string })?.message ?? String(err ?? '');
@@ -31,6 +45,7 @@ function toRecord(row: UserRow): UserRecord {
     gmail: row.gmail,
     firstName: row.first_name ?? null,
     lastName: row.last_name ?? null,
+    lang: row.lang === 'az' || row.lang === 'en' ? row.lang : null,
   };
 }
 
@@ -40,7 +55,7 @@ class MemoryUserStore implements UserStore {
   async getOrCreate(telegramId: number): Promise<{ user: UserRecord; isNew: boolean }> {
     const existing = this.users.get(telegramId);
     if (existing) return { user: existing, isNew: false };
-    const user: UserRecord = { telegramId, gmail: null, firstName: null, lastName: null };
+    const user: UserRecord = { telegramId, gmail: null, firstName: null, lastName: null, lang: null };
     this.users.set(telegramId, user);
     return { user, isNew: true };
   }
@@ -81,6 +96,12 @@ class MemoryUserStore implements UserStore {
     user.lastName = lastName;
     return user;
   }
+
+  async setLang(telegramId: number, lang: 'az' | 'en'): Promise<UserRecord> {
+    const { user } = await this.getOrCreate(telegramId);
+    user.lang = lang;
+    return user;
+  }
 }
 
 interface UserRow {
@@ -88,6 +109,7 @@ interface UserRow {
   gmail: string | null;
   first_name: string | null;
   last_name: string | null;
+  lang?: string | null;
 }
 
 class SupabaseUserStore implements UserStore {
@@ -96,7 +118,7 @@ class SupabaseUserStore implements UserStore {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('telegram_id, gmail, first_name, last_name')
+        .select(userColumns())
         .eq('telegram_id', telegramId)
         .maybeSingle();
       if (error) throw error;
@@ -106,7 +128,7 @@ class SupabaseUserStore implements UserStore {
       const { data: created, error: insErr } = await supabase
         .from('users')
         .insert({ telegram_id: telegramId })
-        .select('telegram_id, gmail, first_name, last_name')
+        .select(userColumns())
         .single();
       if (insErr) throw insErr;
       return { user: toRecord(created as unknown as UserRow), isNew: true };
@@ -117,11 +139,11 @@ class SupabaseUserStore implements UserStore {
         const { data } = await supabase2.from('users').select('telegram_id, gmail').eq('telegram_id', telegramId).maybeSingle();
         if (data) {
           const r = data as unknown as { telegram_id: number; gmail: string | null };
-          return { user: { telegramId: r.telegram_id, gmail: r.gmail, firstName: 'tmp', lastName: 'tmp' }, isNew: false };
+          return { user: { telegramId: r.telegram_id, gmail: r.gmail, firstName: 'tmp', lastName: 'tmp', lang: null }, isNew: false };
         }
         const { data: created } = await supabase2.from('users').insert({ telegram_id: telegramId }).select('telegram_id, gmail').single();
         const r2 = created as unknown as { telegram_id: number; gmail: string | null };
-        return { user: { telegramId: r2.telegram_id, gmail: r2.gmail, firstName: 'tmp', lastName: 'tmp' }, isNew: true };
+        return { user: { telegramId: r2.telegram_id, gmail: r2.gmail, firstName: 'tmp', lastName: 'tmp', lang: null }, isNew: true };
       }
       throw err;
     }
@@ -132,7 +154,7 @@ class SupabaseUserStore implements UserStore {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('telegram_id, gmail, first_name, last_name')
+        .select(userColumns())
         .eq('telegram_id', telegramId)
         .maybeSingle();
       if (error) throw error;
@@ -144,7 +166,7 @@ class SupabaseUserStore implements UserStore {
         const { data } = await supabase.from('users').select('telegram_id, gmail').eq('telegram_id', telegramId).maybeSingle();
         if (!data) return null;
         const r = data as unknown as { telegram_id: number; gmail: string | null };
-        return { telegramId: r.telegram_id, gmail: r.gmail, firstName: 'tmp', lastName: 'tmp' };
+        return { telegramId: r.telegram_id, gmail: r.gmail, firstName: 'tmp', lastName: 'tmp', lang: null };
       }
       throw err;
     }
@@ -155,7 +177,7 @@ class SupabaseUserStore implements UserStore {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('telegram_id, gmail, first_name, last_name')
+        .select(userColumns())
         .ilike('gmail', gmail)
         .maybeSingle();
       if (error) throw error;
@@ -167,7 +189,7 @@ class SupabaseUserStore implements UserStore {
         const { data } = await supabase.from('users').select('telegram_id, gmail').ilike('gmail', gmail).maybeSingle();
         if (!data) return null;
         const r = data as unknown as { telegram_id: number; gmail: string | null };
-        return { telegramId: r.telegram_id, gmail: r.gmail, firstName: 'tmp', lastName: 'tmp' };
+        return { telegramId: r.telegram_id, gmail: r.gmail, firstName: 'tmp', lastName: 'tmp', lang: null };
       }
       throw err;
     }
@@ -180,7 +202,7 @@ class SupabaseUserStore implements UserStore {
         .from('users')
         .update({ gmail })
         .eq('telegram_id', telegramId)
-        .select('telegram_id, gmail, first_name, last_name')
+        .select(userColumns())
         .single();
       if (error) throw error;
       return toRecord(data as unknown as UserRow);
@@ -189,7 +211,7 @@ class SupabaseUserStore implements UserStore {
         namesColumnExists = false;
         const { data } = await supabase.from('users').update({ gmail }).eq('telegram_id', telegramId).select('telegram_id, gmail').single();
         const r = data as unknown as { telegram_id: number; gmail: string | null };
-        return { telegramId: r.telegram_id, gmail: r.gmail, firstName: 'tmp', lastName: 'tmp' };
+        return { telegramId: r.telegram_id, gmail: r.gmail, firstName: 'tmp', lastName: 'tmp', lang: null };
       }
       throw err;
     }
@@ -202,14 +224,14 @@ class SupabaseUserStore implements UserStore {
         .from('users')
         .update({ first_name: firstName, last_name: lastName })
         .eq('telegram_id', telegramId)
-        .select('telegram_id, gmail, first_name, last_name')
+        .select(userColumns())
         .single();
       if (error) throw error;
       return toRecord(data as unknown as UserRow);
     } catch (err) {
       if (isMissingNamesColumn(err)) {
         namesColumnExists = false;
-        return { telegramId, gmail: null, firstName, lastName };
+        return { telegramId, gmail: null, firstName, lastName, lang: null };
       }
       throw err;
     }
@@ -222,14 +244,14 @@ class SupabaseUserStore implements UserStore {
         .from('users')
         .update({ first_name: firstName })
         .eq('telegram_id', telegramId)
-        .select('telegram_id, gmail, first_name, last_name')
+        .select(userColumns())
         .single();
       if (error) throw error;
       return toRecord(data as unknown as UserRow);
     } catch (err) {
       if (isMissingNamesColumn(err)) {
         namesColumnExists = false;
-        return { telegramId, gmail: null, firstName, lastName: null };
+        return { telegramId, gmail: null, firstName, lastName: null, lang: null };
       }
       throw err;
     }
@@ -242,14 +264,37 @@ class SupabaseUserStore implements UserStore {
         .from('users')
         .update({ last_name: lastName })
         .eq('telegram_id', telegramId)
-        .select('telegram_id, gmail, first_name, last_name')
+        .select(userColumns())
         .single();
       if (error) throw error;
       return toRecord(data as unknown as UserRow);
     } catch (err) {
       if (isMissingNamesColumn(err)) {
         namesColumnExists = false;
-        return { telegramId, gmail: null, firstName: null, lastName };
+        return { telegramId, gmail: null, firstName: null, lastName, lang: null };
+      }
+      throw err;
+    }
+  }
+
+  async setLang(telegramId: number, lang: 'az' | 'en'): Promise<UserRecord> {
+    const supabase = getSupabase();
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .update({ lang })
+        .eq('telegram_id', telegramId)
+        .select(userColumns())
+        .single();
+      if (error) throw error;
+      return toRecord(data as unknown as UserRow);
+    } catch (err) {
+      // Column not migrated yet: keep the bot working, just don't remember.
+      if (isMissingLangColumn(err)) {
+        langColumnExists = false;
+        const current = await this.find(telegramId);
+        if (current) return current;
+        return { telegramId, gmail: null, firstName: null, lastName: null, lang: null };
       }
       throw err;
     }

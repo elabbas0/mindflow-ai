@@ -6,7 +6,7 @@ export const telegramUpdateSchema = z.object({
     .object({
       message_id: z.number(),
       chat: z.object({ id: z.number() }),
-      from: z.object({ id: z.number() }).optional(),
+      from: z.object({ id: z.number(), language_code: z.string().optional() }).optional(),
       text: z.string().optional(),
       voice: z.object({ file_id: z.string() }).optional(),
     })

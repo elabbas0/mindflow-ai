@@ -4,6 +4,7 @@ import { getItemStore } from '../events/items.repository.js';
 import { getUserStore } from '../users/users.repository.js';
 import { generateText } from '../extraction/gemini.provider.js';
 import { findCategoryWord, itemDate, parseListRequest } from '../capture/list-intent.js';
+import { detectMarkers } from '../capture/capture.service.js';
 import { resolveRangeStart } from '../capture/dates.js';
 
 function todayBaku(): string {
@@ -37,6 +38,12 @@ export async function askAssistant(input: AssistantQuery): Promise<string> {
   const allItems = await getItemStore().listByUser(user.telegramId);
   if (allItems.length === 0) return 'You have no saved items yet. Send something to the Telegram bot first.';
 
+  // Answer in the user's language: stored preference wins, else the question.
+  const lang = detectMarkers(input.question) ?? user.lang ?? 'en';
+  if (lang !== user.lang) {
+    await users.setLang(user.telegramId, lang);
+  }
+
   // Deterministic range handling: "sabahdan/from tomorrow" counts from that
   // date to infinity (inclusive start, no upper bound); "bugunden/from today"
   // includes today. Pre-filter here so the model counts exactly.
@@ -65,7 +72,7 @@ export async function askAssistant(input: AssistantQuery): Promise<string> {
     })
     .join('\n');
 
-  const system = `You are the MindFlow assistant. Answer the user's question using ONLY the saved items below. Today is ${todayBaku()} (Asia/Baku). Date rules: "sabahdan/from tomorrow/starting tomorrow" means date >= ${fromDate ?? 'the resolved start'} inclusive with NO upper bound (to infinity, count everything on and after that day). "bugunden/from today" means date >= today inclusive — today counts. Items below are already filtered to the requested range: count them exactly, do not drop same-day items. If the answer is not in the items, say so briefly. If the question is ambiguous, ask one clarifying question. Reply in the user's language.`;
+  const system = `You are the MindFlow assistant. Answer the user's question using ONLY the saved items below. Today is ${todayBaku()} (Asia/Baku). Date rules: "sabahdan/from tomorrow/starting tomorrow" means date >= ${fromDate ?? 'the resolved start'} inclusive with NO upper bound (to infinity, count everything on and after that day). "bugunden/from today" means date >= today inclusive — today counts. Items below are already filtered to the requested range: count them exactly, do not drop same-day items. If the answer is not in the items, say so briefly. If the question is ambiguous, ask one clarifying question. Reply in ${lang === 'az' ? 'Azerbaijani' : 'English'}.`;
   const rangeNote = fromDate
     ? `Range start (inclusive, no end): ${fromDate}\nMatching items: ${items.length}\n`
     : '';
