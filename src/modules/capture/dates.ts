@@ -93,3 +93,44 @@ export function resolveDateField(raw: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
   return resolveDateString(text) ?? text;
 }
+
+// Range queries: "sabahdan ...", "bugündən ...", "from tomorrow ...".
+// Returns the inclusive start date (ISO YYYY-MM-DD) with no upper bound,
+// or null when the text carries no from-date intent.
+export function resolveRangeStart(raw: string, baseIso?: string): string | null {
+  const t = raw.trim().toLowerCase();
+  if (!t) return null;
+  const hasMarker =
+    /\b(from|starting|since|after|sonra)\b/.test(t) || /(dan|den|d\u0259n|tan|t\u0259n)\b/.test(t);
+  if (!hasMarker) return null;
+
+  // Strip ablative suffixes so "sabahdan" -> "sabah", "bug\u00fcnd\u0259n" -> "bug\u00fcn".
+  const cleaned = t.replace(/(dan|den|d\u0259n|tan|t\u0259n)\b/g, '').replace(/-/g, ' ');
+  const loose = resolveDateString(cleaned, baseIso) ?? resolveDateString(t, baseIso);
+  if (loose) return loose;
+
+  // Embedded explicit dates inside a question, e.g. "20 sentyabrdan ...".
+  const base = baseIso ?? todayBaku();
+  const iso = t.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (iso) return iso[1];
+  const dm = cleaned.match(
+    new RegExp(`(\\d{1,2})\\s+(${AZ_MONTHS.join('|')})(?:\\s+(\\d{4}))?`),
+  );
+  if (dm) {
+    const day = dm[1].padStart(2, '0');
+    const month = String(AZ_MONTHS.indexOf(dm[2]) + 1).padStart(2, '0');
+    let year = dm[3] ?? base.slice(0, 4);
+    let out = `${year}-${month}-${day}`;
+    if (!dm[3] && out < base) out = `${Number(year) + 1}-${month}-${day}`;
+    return out;
+  }
+  const slash = cleaned.match(/(\d{1,2})[.](\d{1,2})(?:[.](\d{2,4}))?/);
+  if (slash) {
+    const day = slash[1].padStart(2, '0');
+    const month = slash[2].padStart(2, '0');
+    let year = slash[3] ?? String(new Date().getFullYear());
+    if (year.length === 2) year = '20' + year;
+    return `${year}-${month}-${day}`;
+  }
+  return null;
+}

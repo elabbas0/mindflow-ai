@@ -248,7 +248,7 @@ async function handleTextMessage(chatId: number, telegramId: number, text: strin
   }
   const listReq = parseListRequest(text);
   if (listReq) {
-    await sendMessage(chatId, await listUserItems(telegramId, listReq.category));
+    await sendMessage(chatId, await listUserItems(telegramId, listReq.category, listReq.fromDate));
     if (session && session.status === 'awaiting_field' && session.pendingField) {
       await sendMessage(chatId, tr(lang, 'ask_field', { field: fieldLabel(lang, session.pendingField) }));
     }

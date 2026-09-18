@@ -1,5 +1,6 @@
 import { getItemStore, type ItemRecord } from '../events/items.repository.js';
 import { CATEGORIES } from './category-fields.js';
+import { resolveRangeStart } from './dates.js';
 
 const LIST_COMMANDS: Record<string, string | null> = {
   '/list': null,
@@ -27,6 +28,23 @@ const LIST_PHRASES = [
   /goster/,
 ];
 
+const RANGE_QUESTION_PHRASES = [
+  /hansı/,
+  /hansi/,
+  /neçə/,
+  /nece/,
+  /nə qədər/,
+  /ne qeder/,
+  /how many/,
+  /how much/,
+  /\bvar\b/,
+  /\bfrom\b/,
+  /\bsince\b/,
+  /sabahdan/,
+  /bug[uü]n/,
+  /sonra/,
+];
+
 const CATEGORY_WORDS: { id: string; words: string[] }[] = [
   { id: 'todo', words: ['todo', 'task', 'tapşırıq', 'tapsiriq', 'tapshiriq'] },
   { id: 'meetings', words: ['meeting', 'görüş', 'gorus'] },
@@ -36,26 +54,36 @@ const CATEGORY_WORDS: { id: string; words: string[] }[] = [
 
 export interface ListRequest {
   category?: string;
+  fromDate?: string;
 }
 
 export function parseListRequest(text: string): ListRequest | null {
   const t = text.trim().toLowerCase();
-  if (!t || t.length > 60) return null;
+  if (!t || t.length > 80) return null;
 
   const first = t.split(/\s+/)[0];
   if (first.startsWith('/')) {
     if (!(first in LIST_COMMANDS)) return null;
     return { category: LIST_COMMANDS[first] ?? findCategoryWord(t) };
   }
+  // Date-range questions: "sabahdan hansi goruslerim var?",
+  // "from tomorrow, how many meetings/tasks do i have".
+  const fromDate = resolveRangeStart(t);
+  if (fromDate && RANGE_QUESTION_PHRASES.some((re) => re.test(t))) {
+    return { category: findCategoryWord(t), fromDate };
+  }
   if (!LIST_PHRASES.some((re) => re.test(t))) return null;
   return { category: findCategoryWord(t) };
 }
 
-function findCategoryWord(t: string): string | undefined {
-  for (const entry of CATEGORY_WORDS) {
-    if (entry.words.some((w) => t.includes(w))) return entry.id;
-  }
-  return undefined;
+export function findCategoryWord(t: string): string | undefined {
+  const lower = t.toLowerCase();
+  const hits = CATEGORY_WORDS.filter((entry) => entry.words.some((w) => lower.includes(w))).map(
+    (entry) => entry.id,
+  );
+  // "meetings/tasks" mentions several categories: count everything.
+  if (hits.length !== 1) return undefined;
+  return hits[0];
 }
 
 function lineFor(fields: Record<string, string>): string {
@@ -66,10 +94,28 @@ function lineFor(fields: Record<string, string>): string {
   return extras.length > 0 ? `${title} — ${extras.join(' ')}` : title;
 }
 
-export async function listUserItems(userId: number, category?: string): Promise<string> {
+export function itemDate(fields: Record<string, string>): string | null {
+  const raw = fields.date ?? fields.deadline ?? null;
+  if (!raw) return null;
+  const m = raw.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  return m ? m[1] : null;
+}
+
+export async function listUserItems(userId: number, category?: string, fromDate?: string): Promise<string> {
   const items = await getItemStore().listByUser(userId);
-  const wanted = category ? items.filter((item) => item.category === category) : items;
-  if (wanted.length === 0) return 'You have no saved items yet. Send me something first!';
+  const wanted = items.filter((item) => {
+    if (category && item.category !== category) return false;
+    // Range queries count from the date to infinity (inclusive start, no end).
+    if (fromDate) {
+      const d = itemDate(item.fields);
+      if (!d || d < fromDate) return false;
+    }
+    return true;
+  });
+  if (wanted.length === 0) {
+    if (fromDate) return `No saved items from ${fromDate} onward yet. Send me something first!`;
+    return 'You have no saved items yet. Send me something first!';
+  }
 
   const byCategory = new Map<string, ItemRecord[]>();
   for (const item of wanted) {
