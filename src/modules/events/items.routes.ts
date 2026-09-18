@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { CATEGORIES, CATEGORY_IDS, FIELD_ORDER, FIELD_LABELS } from '../capture/category-fields.js';
 import { resolveDateField } from '../capture/dates.js';
+import { resolveTimeField } from '../capture/times.js';
 import { findUser } from '../users/identify.js';
 import { getItemStore } from './items.repository.js';
 
@@ -179,6 +180,7 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
       const fields = { ...parsed.data.fields };
       if (fields.date) fields.date = resolveDateField(fields.date);
       if (fields.deadline) fields.deadline = resolveDateField(fields.deadline);
+      if (fields.time) fields.time = resolveTimeField(fields.time);
       const item = await getItemStore().save({ userId: scoped.telegramId, category: parsed.data.category, fields });
       return reply.code(201).send({ ok: true, item: toJson(item) });
     },
@@ -236,6 +238,7 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
         const merged = { ...existing.fields, ...parsed.data.fields };
         if (merged.date) merged.date = resolveDateField(merged.date);
         if (merged.deadline) merged.deadline = resolveDateField(merged.deadline);
+        if (merged.time) merged.time = resolveTimeField(merged.time);
         if (merged.description && merged.notes) delete merged.notes;
         patch.fields = merged;
       }
@@ -300,6 +303,7 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
       const fields = { ...parsed.data.fields };
       if (fields.date) fields.date = resolveDateField(fields.date);
       if (fields.deadline) fields.deadline = resolveDateField(fields.deadline);
+      if (fields.time) fields.time = resolveTimeField(fields.time);
       const updated = await store.update(params.id, { category: parsed.data.category, fields });
       if (!updated) return reply.code(404).send({ ok: false, error: 'Item not found.' });
       return reply.send({ ok: true, item: toJson(updated) });

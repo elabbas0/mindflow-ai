@@ -1,5 +1,6 @@
 import { env } from '../../config/env.js';
 import { resolveDateString } from '../capture/dates.js';
+import { resolveTimeString } from '../capture/times.js';
 import { GeminiExtractionProvider } from './gemini.provider.js';
 
 export interface ExtractedFields {
@@ -36,13 +37,8 @@ class StubExtractionProvider implements ExtractionProvider {
     const t = text.trim();
     const out: ExtractedFields = {};
 
-    const hm = t.match(/(\d{1,2})[:.](\d{2})/);
-    if (hm) {
-      out.time = `${hm[1].padStart(2, '0')}:${hm[2]}`;
-    } else {
-      const h = t.match(/saat\s+(\d{1,2})/i);
-      if (h) out.time = `${h[1].padStart(2, '0')}:00`;
-    }
+    const tm = resolveTimeString(t);
+    if (tm) out.time = tm;
 
     const iso = resolveDateString(t);
     if (iso) {

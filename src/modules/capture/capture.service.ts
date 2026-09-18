@@ -8,6 +8,7 @@ import { getUserStore } from '../users/users.repository.js';
 import { listUserItems, parseListRequest } from './list-intent.js';
 import { CATEGORIES, CATEGORY_IDS, FIELD_LABELS, FIELD_ORDER, type CategoryId } from './category-fields.js';
 import { resolveDateField } from './dates.js';
+import { resolveTimeField } from './times.js';
 
 const GREETINGS = new Set(['salam', 'salam aleykum', 'salam aleyküm', 'salam aleykum', 'hello', 'hi', 'hey', 'saj', 'salamlar']);
 
@@ -576,6 +577,7 @@ function resolveDateFields(fields: Record<string, string>): Record<string, strin
   const out = { ...fields };
   if (out.date) out.date = resolveDateField(out.date);
   if (out.deadline) out.deadline = resolveDateField(out.deadline);
+  if (out.time) out.time = resolveTimeField(out.time);
   return out;
 }
 
@@ -661,9 +663,13 @@ async function handleFieldAnswer(chatId: number, session: Session, text: string,
     if (value && !fields[key]) fields[key] = value;
   }
   if (!fields[field]) {
-    fields[field] = field === 'date' || field === 'deadline' ? resolveDateField(text) : text;
+    if (field === 'date' || field === 'deadline') fields[field] = resolveDateField(text);
+    else if (field === 'time') fields[field] = resolveTimeField(text);
+    else fields[field] = text;
   } else if (fields[field] && (field === 'date' || field === 'deadline')) {
     fields[field] = resolveDateField(fields[field]);
+  } else if (fields[field] && field === 'time') {
+    fields[field] = resolveTimeField(fields[field]);
   }
   await continueCapture(chatId, { ...session, draft: { ...session.draft, fields } }, lang);
 }

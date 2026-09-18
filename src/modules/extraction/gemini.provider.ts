@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { resolveDateField, todayBaku } from '../capture/dates.js';
+import { resolveTimeField } from '../capture/times.js';
 import type { ExtractedFields, ExtractionProvider } from './extraction.provider.js';
 
 const extractedSchema = z
@@ -21,6 +22,7 @@ function systemPrompt(): string {
   return `You extract structured fields from a short user message (Azerbaijani or English) for a personal organizer app.
 Today is ${todayBaku()} (Asia/Baku timezone).
 Resolve relative dates (sabah, bugun, bu gun, next week, etc.) against today and output ISO YYYY-MM-DD for date and deadline; times as 24h HH:MM.
+Time expressions: "yarısı/half past" is :30 ("6-nın yarısı" -> 06:30); "qalmış/quarter to" counts back ("6-ya qalmış 15 dəqiqə" -> 05:45); "keçib/N minutes past" counts forward ("6-nı 15 dəqiqə keçib" -> 06:15); honor am/pm, noon (12:00), midnight (00:00), and dayparts (axşam/evening/pm add 12 to hours 1-11).
 Reply with JSON only, containing only keys you are confident about from: title, description, location, deadline, date, time.
 title: short 3-8 word name of the task/meeting/project/note, never the whole message.
 description: what needs to be done and any extra context/notes. location: venue, platform, or city.
@@ -45,6 +47,7 @@ function safeParse(raw: string): ExtractedFields | null {
     }
     if (out.date) out.date = resolveDateField(out.date);
     if (out.deadline) out.deadline = resolveDateField(out.deadline);
+    if (out.time) out.time = resolveTimeField(out.time);
     return out;
   } catch {
     return null;
