@@ -133,6 +133,10 @@ class SupabaseUserStore implements UserStore {
       if (insErr) throw insErr;
       return { user: toRecord(created as unknown as UserRow), isNew: true };
     } catch (err) {
+      if (isMissingLangColumn(err)) {
+        langColumnExists = false;
+        return this.getOrCreate(telegramId);
+      }
       if (isMissingNamesColumn(err) || isMissingNamesColumn((err as Error)?.message)) {
         namesColumnExists = false;
         const supabase2 = getSupabase();
@@ -161,6 +165,10 @@ class SupabaseUserStore implements UserStore {
       if (!data) return null;
       return toRecord(data as unknown as UserRow);
     } catch (err) {
+      if (isMissingLangColumn(err)) {
+        langColumnExists = false;
+        return this.find(telegramId);
+      }
       if (isMissingNamesColumn(err)) {
         namesColumnExists = false;
         const { data } = await supabase.from('users').select('telegram_id, gmail').eq('telegram_id', telegramId).maybeSingle();
@@ -184,6 +192,10 @@ class SupabaseUserStore implements UserStore {
       if (!data) return null;
       return toRecord(data as unknown as UserRow);
     } catch (err) {
+      if (isMissingLangColumn(err)) {
+        langColumnExists = false;
+        return this.findByGmail(gmail);
+      }
       if (isMissingNamesColumn(err)) {
         namesColumnExists = false;
         const { data } = await supabase.from('users').select('telegram_id, gmail').ilike('gmail', gmail).maybeSingle();
@@ -207,6 +219,10 @@ class SupabaseUserStore implements UserStore {
       if (error) throw error;
       return toRecord(data as unknown as UserRow);
     } catch (err) {
+      if (isMissingLangColumn(err)) {
+        langColumnExists = false;
+        return this.setGmail(telegramId, gmail);
+      }
       if (isMissingNamesColumn(err)) {
         namesColumnExists = false;
         const { data } = await supabase.from('users').update({ gmail }).eq('telegram_id', telegramId).select('telegram_id, gmail').single();
@@ -229,6 +245,10 @@ class SupabaseUserStore implements UserStore {
       if (error) throw error;
       return toRecord(data as unknown as UserRow);
     } catch (err) {
+      if (isMissingLangColumn(err)) {
+        langColumnExists = false;
+        return this.setNames(telegramId, firstName, lastName);
+      }
       if (isMissingNamesColumn(err)) {
         namesColumnExists = false;
         return { telegramId, gmail: null, firstName, lastName, lang: null };
@@ -249,6 +269,10 @@ class SupabaseUserStore implements UserStore {
       if (error) throw error;
       return toRecord(data as unknown as UserRow);
     } catch (err) {
+      if (isMissingLangColumn(err)) {
+        langColumnExists = false;
+        return this.setFirstName(telegramId, firstName);
+      }
       if (isMissingNamesColumn(err)) {
         namesColumnExists = false;
         return { telegramId, gmail: null, firstName, lastName: null, lang: null };
@@ -269,6 +293,10 @@ class SupabaseUserStore implements UserStore {
       if (error) throw error;
       return toRecord(data as unknown as UserRow);
     } catch (err) {
+      if (isMissingLangColumn(err)) {
+        langColumnExists = false;
+        return this.setLastName(telegramId, lastName);
+      }
       if (isMissingNamesColumn(err)) {
         namesColumnExists = false;
         return { telegramId, gmail: null, firstName: null, lastName, lang: null };
