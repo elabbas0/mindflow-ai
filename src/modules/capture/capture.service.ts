@@ -7,7 +7,7 @@ import { getSessionStore, type Session } from './session.store.js';
 import { getUserStore } from '../users/users.repository.js';
 import { listUserItems, parseListRequest } from './list-intent.js';
 import { CATEGORIES, CATEGORY_IDS, FIELD_LABELS, FIELD_ORDER, type CategoryId } from './category-fields.js';
-import { resolveDateField } from './dates.js';
+import { resolveDateField, resolveVisitDateField } from './dates.js';
 import { resolveTimeField } from './times.js';
 
 const GREETINGS = new Set(['salam', 'salam aleykum', 'salam aleyküm', 'salam aleykum', 'hello', 'hi', 'hey', 'saj', 'salamlar']);
@@ -137,8 +137,8 @@ export function resolveLang(
 
 const STR: Record<'en' | 'az', Record<string, string>> = {
   en: {
-    greeting: `Hi! I'm MindFlow 🧠\nSend me anything — a task, a meeting, a project idea, or a note — and I'll organize it for you.`,
-    help: `Here's how I work:\n1. Send me anything (text or voice).\n2. Pick one of 4 categories.\n3. Answer my follow-up questions, one at a time.\n\nCommands:\n/start — start over\ncancel — stop what we're doing\n/list — show my saved items\n/help — show this message`,
+    greeting: `Hi! I'm MindFlow 🧠\nSend me anything — a task, a meeting, a project idea, a note, or a health record — and I'll organize it for you.`,
+    help: `Here's how I work:\n1. Send me anything (text or voice).\n2. Pick one of 5 categories.\n3. Answer my follow-up questions, one at a time.\n\nCommands:\n/start — start over\ncancel — stop what we're doing\n/list — show my saved items\n/help — show this message`,
     gmail_prompt: 'Welcome to MindFlow! Please share your gmail address to set up your account.',
     invalid_gmail: 'That does not look like a valid gmail address. Please try again.',
     thanks_first_name: 'Thanks! What is your full name? Write name and surname together, like "Aysel Mammadova".',
@@ -162,10 +162,14 @@ const STR: Record<'en' | 'az', Record<string, string>> = {
     edit_done: '✅ Updated.',
     edit_cancelled: 'OK, left it as is. Send me anything to start over.',
     edit_bad_number: 'That number is not on the list. Try again.',
+    ask_files: 'Do you want to add a prescription or test file? (yes/no)',
+    files_more: 'Want to add another file? Send the file or write "done".',
+    file_saved: '✅ File saved.',
+    file_skip: 'OK, no files added.',
   },
   az: {
-    greeting: `Salam! Mən MindFlow 🧠\nMənə istənilən şeyi göndərin — tapşırıq, görüş, layihə ideyası və ya qeyd — və mən onu sizin üçün təşkil edim.`,
-    help: `Mən belə işləyirəm:\n1. Mənə istənilən şeyi (mətn və ya səs) göndərin.\n2. 4 kateqoriyadan birini seçin.\n3. Suallarıma bir-bir cavab verin.\n\nƏmrlər:\n/start — yenidən başla\ncancel — ləğv et\n/list — yadda saxlanılanları göstər\n/help — kömək`,
+    greeting: `Salam! Mən MindFlow 🧠\nMənə istənilən şeyi göndərin — tapşırıq, görüş, layihə ideyası, qeyd və ya sağlamlıq qeydi — və mən onu sizin üçün təşkil edim.`,
+    help: `Mən belə işləyirəm:\n1. Mənə istənilən şeyi (mətn və ya səs) göndərin.\n2. 5 kateqoriyadan birini seçin.\n3. Suallarıma bir-bir cavab verin.\n\nƏmrlər:\n/start — yenidən başla\ncancel — ləğv et\n/list — yadda saxlanılanları göstər\n/help — kömək`,
     gmail_prompt: 'MindFlow-a xoş gəldiniz! Hesabınızı qurmaq üçün gmail ünvanınızı göndərin.',
     invalid_gmail: 'Bu düzgün gmail ünvanı kimi görünmür. Zəhmət olmasa yenidən cəhd edin.',
     thanks_first_name: 'Təşəkkürlər! Ad və soyadınızı birlikdə yazın, məsələn "Aysel Məmmədova".',
@@ -189,15 +193,147 @@ const STR: Record<'en' | 'az', Record<string, string>> = {
     edit_done: '✅ Yeniləndi.',
     edit_cancelled: 'Oldu, olduğu kimi qaldı. Yenidən başlamaq üçün nəsə göndərin.',
     edit_bad_number: 'Bu nömrə siyahıda yoxdur. Yenidən cəhd edin.',
+    ask_files: 'Resept və ya analiz faylı əlavə etmək istəyirsiniz? (bəli/xeyr)',
+    files_more: 'Daha fayl əlavə etmək istəyirsiniz? Faylı göndərin və ya \'bitdi\' yazın.',
+    file_saved: '✅ Fayl yadda saxlanıldı.',
+    file_skip: 'Oldu, fayl əlavə edilmədi.',
   },
 };
 
 const FIELD_LABELS_I18N: Record<'en' | 'az', Record<string, string>> = {
-  en: { title: 'Title', description: 'Description', location: 'Location', date: 'Date', time: 'Time', deadline: 'Deadline', notes: 'Description' },
-  az: { title: 'Başlıq', description: 'Təsvir', location: 'Məkan', date: 'Tarix', time: 'Vaxt', deadline: 'Son tarix', notes: 'Təsvir' },
+  en: {
+    title: 'Title',
+    description: 'Description',
+    location: 'Location',
+    date: 'Date',
+    time: 'Time',
+    deadline: 'Deadline',
+    notes: 'Description',
+    doctor: 'Doctor',
+    specialty: 'Specialty',
+    diagnosis: 'Diagnosis',
+    visit_date: 'Visit date',
+    files: 'Files',
+  },
+  az: {
+    title: 'Başlıq',
+    description: 'Təsvir',
+    location: 'Məkan',
+    date: 'Tarix',
+    time: 'Vaxt',
+    deadline: 'Son tarix',
+    notes: 'Təsvir',
+    doctor: 'Həkim',
+    specialty: 'İxtisas',
+    diagnosis: 'Diaqnoz',
+    visit_date: 'Həkimə getmə tarixi',
+    files: 'Fayllar',
+  },
 };
 
 const CANCEL_WORDS = new Set(['cancel', '/cancel', 'stop', '/stop', 'ləğv et', 'ləğv', 'legv et', 'legv', 'imtina']);
+
+// Health optional fields can be skipped with any of these answers.
+// `bitdi`/`done` only finish the files step (handled separately).
+const HEALTH_SKIP_PHRASES = [
+  'no',
+  'xeyr',
+  'yox',
+  'yoxdur',
+  'yoxdu',
+  'skip',
+  'keç',
+  'kec',
+  'none',
+  'lazım deyil',
+  'lazim deyil',
+  'əlavə etmək istəmirəm',
+  'elave etmek istemirem',
+  'istəmirəm',
+  'istemirem',
+  'no diagnosis',
+];
+
+const FILES_DONE_WORDS = new Set(['bitdi', 'done', 'bitti', 'qurtardi', 'qurtardı', 'finish', 'vəssalam', 'vessalam']);
+
+function isHealthSkip(text: string): boolean {
+  const t = text.toLowerCase().trim();
+  if (HEALTH_SKIP_PHRASES.includes(t)) return true;
+  // Phrases like "yox, ...", "no ..." also count as skipping.
+  return HEALTH_SKIP_PHRASES.some((p) => t === p || t.startsWith(p + ' ') || t.startsWith(p + ','));
+}
+
+function isFilesDone(text: string): boolean {
+  return FILES_DONE_WORDS.has(text.toLowerCase().trim());
+}
+
+export interface HealthFileRef {
+  file_id: string;
+  file_name?: string;
+  mime_type?: string;
+}
+
+export function parseFiles(raw: string | undefined): HealthFileRef[] {
+  if (!raw) return [];
+  const t = raw.trim();
+  if (!t) return [];
+  try {
+    const parsed: unknown = JSON.parse(t);
+    if (Array.isArray(parsed)) {
+      const out: HealthFileRef[] = [];
+      for (const entry of parsed) {
+        if (typeof entry === 'string' && entry.trim()) {
+          out.push({ file_id: entry.trim() });
+        } else if (entry && typeof entry === 'object') {
+          const rec = entry as Record<string, unknown>;
+          if (typeof rec['file_id'] === 'string' && rec['file_id'].trim()) {
+            out.push({
+              file_id: rec['file_id'].trim(),
+              ...(typeof rec['file_name'] === 'string' ? { file_name: rec['file_name'] } : {}),
+              ...(typeof rec['mime_type'] === 'string' ? { mime_type: rec['mime_type'] } : {}),
+            });
+          }
+        }
+      }
+      return out;
+    }
+  } catch {
+    // Fall through to legacy comma-separated handling.
+  }
+  return t
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((file_id) => ({ file_id }));
+}
+
+export function serializeFiles(files: HealthFileRef[]): string {
+  return JSON.stringify(files);
+}
+
+/** Auto-generate a health title: first ~8 words of the description (max 80 chars). */
+function generateHealthTitle(description: string): string {
+  const words = description.trim().split(/\s+/).filter(Boolean).slice(0, 8);
+  if (words.length === 0) return 'Health record';
+  return words.join(' ').slice(0, 80) || 'Health record';
+}
+
+function isHealthFieldMissing(fields: Record<string, string>, name: string): boolean {
+  // Skipped optional fields are stored as '' (key present) and count as answered.
+  if (name in fields) {
+    if (name === 'description') return !fields[name]?.trim();
+    return false;
+  }
+  return true;
+}
+
+function filesSummary(raw: string | undefined, lang: 'az' | 'en'): string {
+  const files = parseFiles(raw);
+  if (files.length === 0) return '—';
+  const names = files.map((f) => f.file_name || f.file_id).slice(0, 3);
+  const more = files.length > 3 ? (lang === 'az' ? ` (+${files.length - 3} fayl)` : ` (+${files.length - 3} more)`) : '';
+  return `${files.length} ${lang === 'az' ? 'fayl' : 'file(s)'}: ${names.join(', ')}${more}`;
+}
 
 const EDIT_WORDS = new Set([
   '/edit',
@@ -246,6 +382,36 @@ export async function handleCapture(update: TelegramUpdate): Promise<void> {
   const tgLang: 'az' | null =
     message.from?.language_code?.toLowerCase().startsWith('az') ? 'az' : null;
 
+  const incomingFiles: HealthFileRef[] = [];
+  if (message.document) {
+    incomingFiles.push({
+      file_id: message.document.file_id,
+      ...(message.document.file_name ? { file_name: message.document.file_name } : {}),
+      ...(message.document.mime_type ? { mime_type: message.document.mime_type } : {}),
+    });
+  }
+  if (message.photo && message.photo.length > 0) {
+    const best = message.photo[message.photo.length - 1];
+    if (best) incomingFiles.push({ file_id: best.file_id });
+  }
+  const captionText = (message.caption ?? '').trim();
+
+  // Health files step: attachments go straight to the pending record.
+  if (incomingFiles.length > 0) {
+    const sessions = getSessionStore();
+    const existing = await sessions.get(chatId);
+    if (
+      existing &&
+      existing.status === 'awaiting_field' &&
+      existing.pendingField === 'files' &&
+      existing.draft.category === 'health'
+    ) {
+      const lang = (await getUserStore().find(existing.userId))?.lang ?? tgLang ?? 'en';
+      await handleHealthFileAttach(chatId, existing, incomingFiles, lang);
+      return;
+    }
+  }
+
   if (message.voice) {
     const voiceLang = (await getUserStore().find(telegramId))?.lang ?? tgLang ?? 'en';
     if (!isVoiceConfigured()) {
@@ -264,10 +430,54 @@ export async function handleCapture(update: TelegramUpdate): Promise<void> {
       return;
     }
     await handleTextMessage(chatId, telegramId, transcript, tgLang);
+    if (incomingFiles.length > 0) await stashIncomingFiles(chatId, incomingFiles);
     return;
   }
 
-  await handleTextMessage(chatId, telegramId, (message.text ?? '').trim(), tgLang);
+  const text = ((message.text ?? captionText) ?? '').trim();
+  // A lone file without caption still starts capture so the category
+  // buttons appear; the file ref is stashed for the later files step.
+  if (!text && incomingFiles.length > 0) {
+    const u = await getUserStore().find(telegramId);
+    const lang = u?.lang ?? tgLang ?? 'en';
+    await startCapture(chatId, telegramId, captionText || '(file)', lang);
+    await stashIncomingFiles(chatId, incomingFiles);
+    return;
+  }
+  await handleTextMessage(chatId, telegramId, text, tgLang);
+  if (incomingFiles.length > 0) await stashIncomingFiles(chatId, incomingFiles);
+}
+
+async function stashIncomingFiles(chatId: number, files: HealthFileRef[]): Promise<void> {
+  const sessions = getSessionStore();
+  const session = await sessions.get(chatId);
+  if (!session) return;
+  if (session.draft.category !== undefined && session.draft.category !== 'health') return;
+  const current = parseFiles(session.draft.fields['files']);
+  const merged = [...current, ...files].slice(0, 10);
+  await sessions.save({
+    ...session,
+    draft: { ...session.draft, fields: { ...session.draft.fields, files: serializeFiles(merged) } },
+  });
+}
+
+async function handleHealthFileAttach(
+  chatId: number,
+  session: Session,
+  files: HealthFileRef[],
+  lang: 'az' | 'en',
+): Promise<void> {
+  const sessions = getSessionStore();
+  const current = parseFiles(session.draft.fields['files']);
+  const merged = [...current, ...files].slice(0, 10);
+  const updated: Session = {
+    ...session,
+    draft: { ...session.draft, fields: { ...session.draft.fields, files: serializeFiles(merged) } },
+  };
+  await sessions.save({ ...updated, status: 'awaiting_field', pendingField: 'files' });
+  await sendMessage(chatId, tr(lang, 'file_saved'));
+  const fresh = await sessions.get(chatId);
+  if (fresh) await sendMessage(chatId, tr(lang, 'files_more'));
 }
 
 function isValidGmail(text: string): boolean {
@@ -310,6 +520,16 @@ function formatSavedItem(category: string, fields: Record<string, string>, lang:
   const label = CATEGORIES.find((c) => c.id === category)?.label ?? category;
   const normalized = { ...fields };
   if (normalized['notes'] && !normalized['description']) normalized['description'] = normalized['notes'];
+  // PRD: health title is first visible, then description/doctor/specialty/
+  // diagnosis/visit_date/files (files rendered as count/names, storage-only).
+  if (category === 'health') {
+    const order = ['title', 'description', 'doctor', 'specialty', 'diagnosis', 'visit_date', 'files'];
+    const lines = order.map((name) => {
+      const value = name === 'files' ? filesSummary(normalized[name], lang) : (normalized[name]?.trim() ? normalized[name] : '—');
+      return `• ${fieldLabel(lang, name)}: ${value}`;
+    });
+    return `${tr(lang, 'saved_to', { label })}\n${lines.join('\n')}`;
+  }
   const lines = CATEGORIES.find((c) => c.id === category)
     ? FIELD_ORDER[category as CategoryId].map((name) => `• ${fieldLabel(lang, name)}: ${normalized[name] ?? '—'}`)
     : Object.entries(normalized).map(([k, v]) => `• ${fieldLabel(lang, k) ?? k}: ${v}`);
@@ -577,20 +797,43 @@ function resolveDateFields(fields: Record<string, string>): Record<string, strin
   const out = { ...fields };
   if (out.date) out.date = resolveDateField(out.date);
   if (out.deadline) out.deadline = resolveDateField(out.deadline);
+  if (out.visit_date) out.visit_date = resolveVisitDateField(out.visit_date);
   if (out.time) out.time = resolveTimeField(out.time);
   return out;
+}
+
+function healthMissing(order: string[], fields: Record<string, string>): string | undefined {
+  return order.find((name) => isHealthFieldMissing(fields, name));
 }
 
 async function continueCapture(chatId: number, session: Session, lang: 'az' | 'en' = 'en'): Promise<void> {
   const category = session.draft.category as CategoryId;
   const order = FIELD_ORDER[category] ?? [];
   const normalized = resolveDateFields(normalizeFields(session.draft.fields));
-  const missing = order.find((name) => !normalized[name]?.trim());
   const sessions = getSessionStore();
+
+  // Health: auto-generate title from the description (never asked).
+  // A stub-artifact title ("Dr" from splitting "Dr. ...") is replaced once
+  // the real description is known; quality AI titles are kept.
+  if (category === 'health' && normalized['description']?.trim()) {
+    if (!normalized['title']?.trim() || normalized['title'].trim().length < 4) {
+      normalized['title'] = generateHealthTitle(normalized['description']);
+    }
+  }
+
+  const missing =
+    category === 'health' ? healthMissing(order, normalized) : order.find((name) => !normalized[name]?.trim());
 
   if (!missing) {
     const toSave = { ...normalized };
     delete (toSave as Record<string, string>)['notes'];
+    if (category === 'health' && !toSave['title']?.trim()) toSave['title'] = 'Health record';
+    if (category === 'health') {
+      // Generic stub artifacts: the visit date lives in visit_date only.
+      delete toSave.date;
+      delete toSave.deadline;
+      delete toSave.time;
+    }
     await getItemStore().save({ userId: session.userId, category, fields: toSave });
     await sessions.clear(chatId);
     await sendMessage(chatId, formatSavedItem(category, toSave, lang));
@@ -598,6 +841,11 @@ async function continueCapture(chatId: number, session: Session, lang: 'az' | 'e
   }
   const nextSession = normalized !== session.draft.fields ? { ...session, draft: { ...session.draft, fields: normalized } } : session;
   await sessions.save({ ...nextSession, status: 'awaiting_field', pendingField: missing });
+  if (category === 'health' && missing === 'files') {
+    // Opt-in step: keep whatever files were stashed, ask explicitly.
+    await sendMessage(chatId, tr(lang, 'ask_files'));
+    return;
+  }
   await sendMessage(chatId, tr(lang, 'ask_field', { field: fieldLabel(lang, missing) }));
 }
 
@@ -617,6 +865,7 @@ async function startCapture(chatId: number, telegramId: number, text: string, la
       { text: '📅 Meetings', callback_data: 'cat:meetings' },
       { text: '📝 Notes', callback_data: 'cat:notes' },
     ],
+    [{ text: '🏥 Health', callback_data: 'cat:health' }],
   ]);
 }
 
@@ -636,6 +885,10 @@ async function handleCategoryChoice(query: CallbackSelection): Promise<void> {
   for (const [key, value] of Object.entries(found)) {
     if (value) fields[key] = value;
   }
+  // Keep file refs stashed before the category was chosen.
+  if (session.draft.fields['files'] && !fields['files']) {
+    fields['files'] = session.draft.fields['files'];
+  }
   const stored = (await getUserStore().find(session.userId))?.lang ?? null;
   const lang = detectMarkers(session.draft.rawText) ?? stored ?? 'en';
   await continueCapture(query.chatId, {
@@ -653,7 +906,32 @@ async function handleFieldAnswer(chatId: number, session: Session, text: string,
     return;
   }
   if (!text) {
-    await sendMessage(chatId, tr(lang, 'ask_field', { field: fieldLabel(lang, field) }));
+    if (category === 'health' && field === 'files') {
+      await sendMessage(chatId, tr(lang, 'ask_files'));
+    } else {
+      await sendMessage(chatId, tr(lang, 'ask_field', { field: fieldLabel(lang, field) }));
+    }
+    return;
+  }
+
+  // Health files step: text answers finish the step (skip/done),
+  // anything else re-asks. Files themselves arrive via handleCapture.
+  if (category === 'health' && field === 'files') {
+    if (isFilesDone(text) || isHealthSkip(text)) {
+      const fields = { ...session.draft.fields };
+      if (!('files' in fields)) fields['files'] = '';
+      await continueCapture(chatId, { ...session, draft: { ...session.draft, fields } }, lang);
+      return;
+    }
+    // Treat a "yes/bəli" as: wait for the actual file upload.
+    await sendMessage(chatId, tr(lang, 'files_more'));
+    return;
+  }
+
+  // Health optional fields: a skip answer leaves the field empty.
+  if (category === 'health' && field !== 'description' && isHealthSkip(text)) {
+    const fields = { ...session.draft.fields, [field]: '' };
+    await continueCapture(chatId, { ...session, draft: { ...session.draft, fields } }, lang);
     return;
   }
 
@@ -663,9 +941,12 @@ async function handleFieldAnswer(chatId: number, session: Session, text: string,
     if (value && !fields[key]) fields[key] = value;
   }
   if (!fields[field]) {
-    if (field === 'date' || field === 'deadline') fields[field] = resolveDateField(text);
+    if (field === 'visit_date') fields[field] = resolveVisitDateField(text);
+    else if (field === 'date' || field === 'deadline') fields[field] = resolveDateField(text);
     else if (field === 'time') fields[field] = resolveTimeField(text);
     else fields[field] = text;
+  } else if (fields[field] && field === 'visit_date') {
+    fields[field] = resolveVisitDateField(fields[field]);
   } else if (fields[field] && (field === 'date' || field === 'deadline')) {
     fields[field] = resolveDateField(fields[field]);
   } else if (fields[field] && field === 'time') {
@@ -833,7 +1114,12 @@ async function handleEditAnswer(chatId: number, telegramId: number, session: Ses
       await sendMessage(chatId, tr(lang, 'edit_none'));
       return;
     }
-    const value = field === 'date' || field === 'deadline' ? resolveDateField(text.trim()) : text.trim();
+    const value =
+      field === 'visit_date'
+        ? resolveVisitDateField(text.trim())
+        : field === 'date' || field === 'deadline'
+          ? resolveDateField(text.trim())
+          : text.trim();
     if (!value) {
       await sendMessage(chatId, tr(lang, 'edit_bad_number'));
       return;

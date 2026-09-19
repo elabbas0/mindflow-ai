@@ -72,7 +72,7 @@ export async function askAssistant(input: AssistantQuery): Promise<string> {
     })
     .join('\n');
 
-  const system = `You are the MindFlow assistant. Answer the user's question using ONLY the saved items below. Today is ${todayBaku()} (Asia/Baku). Date rules: "sabahdan/from tomorrow/starting tomorrow" means date >= ${fromDate ?? 'the resolved start'} inclusive with NO upper bound (to infinity, count everything on and after that day). "bugunden/from today" means date >= today inclusive — today counts. Items below are already filtered to the requested range: count them exactly, do not drop same-day items. If the answer is not in the items, say so briefly. If the question is ambiguous, ask one clarifying question. Reply in ${lang === 'az' ? 'Azerbaijani' : 'English'}.`;
+  const system = `You are the MindFlow assistant. Answer the user's question using ONLY the saved items below. Today is ${todayBaku()} (Asia/Baku). Date rules: "sabahdan/from tomorrow/starting tomorrow" means date >= ${fromDate ?? 'the resolved start'} inclusive with NO upper bound (to infinity, count everything on and after that day). "bugunden/from today" means date >= today inclusive — today counts. Items below are already filtered to the requested range: count them exactly, do not drop same-day items. Health records contain title/description/doctor/specialty/diagnosis/visit_date/files. Never invent a diagnosis; only quote stored diagnosis. If the answer is not in the items, say so briefly. If the question is ambiguous, ask one clarifying question. Reply in ${lang === 'az' ? 'Azerbaijani' : 'English'}.`;
   const rangeNote = fromDate
     ? `Range start (inclusive, no end): ${fromDate}\nMatching items: ${items.length}\n`
     : '';

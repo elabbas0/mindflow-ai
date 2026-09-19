@@ -67,9 +67,11 @@ Test endpoints for the frontend (no keys needed):
 
 Frontend API (identify the user with `telegramId` or `gmail`):
 
-- `GET /api/categories` → 4 categories, required fields, ask order
+- `GET /api/categories` → 5 categories, required fields, ask order
 - `GET|POST /api/users` → look up or get-or-create an account
 - `GET /api/items` → list (optional `category`, `limit`)
 - `GET|PATCH|DELETE /api/items/:id` → read, edit, delete (owner only)
-- `POST /api/items` → create (all required fields enforced)
+- `POST /api/items` → create (required fields per category enforced; health needs only `description`)
+- `POST /api/items/:id/files` → attach a file ref to a health record (owner only, max 10)
+- `DELETE /api/items/:id/files` → remove a file ref by `file_id` or `index` (owner only)
 - `POST /api/assistant/ask` → Q&A over saved items

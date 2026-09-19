@@ -9,6 +9,7 @@ const LIST_COMMANDS: Record<string, string | null> = {
   '/meetings': 'meetings',
   '/projects': 'projects',
   '/notes': 'notes',
+  '/health': 'health',
 };
 
 const LIST_PHRASES = [
@@ -50,6 +51,25 @@ const CATEGORY_WORDS: { id: string; words: string[] }[] = [
   { id: 'meetings', words: ['meeting', 'görüş', 'gorus'] },
   { id: 'projects', words: ['project', 'proyekt', 'layihə', 'layihe'] },
   { id: 'notes', words: ['note', 'qeyd', 'not'] },
+  {
+    id: 'health',
+    words: [
+      'health',
+      'sağlamlıq',
+      'saglamliq',
+      'doctor',
+      'həkim',
+      'hekim',
+      'hospital',
+      'xəstəxana',
+      'xestexana',
+      'resept',
+      'prescription',
+      'analiz',
+      'diagnosis',
+      'diaqnoz',
+    ],
+  },
 ];
 
 export interface ListRequest {
@@ -88,6 +108,11 @@ export function findCategoryWord(t: string): string | undefined {
 
 function lineFor(fields: Record<string, string>): string {
   const title = fields.title || fields.description || fields.notes || 'Untitled';
+  // Health lines prefer the title and append doctor + visit date.
+  if (fields.visit_date || fields.doctor) {
+    const extras = [fields.doctor, fields.visit_date].filter((v): v is string => !!v);
+    return extras.length > 0 ? `${title} — ${extras.join(' ')}` : title;
+  }
   const extras = [fields.date, fields.time ?? fields.deadline, fields.location].filter(
     (v): v is string => !!v,
   );
@@ -95,7 +120,7 @@ function lineFor(fields: Record<string, string>): string {
 }
 
 export function itemDate(fields: Record<string, string>): string | null {
-  const raw = fields.date ?? fields.deadline ?? null;
+  const raw = fields.date ?? fields.deadline ?? fields.visit_date ?? null;
   if (!raw) return null;
   const m = raw.match(/\b(\d{4}-\d{2}-\d{2})\b/);
   return m ? m[1] : null;

@@ -94,6 +94,26 @@ export function resolveDateField(raw: string): string {
   return resolveDateString(text) ?? text;
 }
 
+// Health "doctor visit date" normalizer: a visit already happened, so a
+// year-less date that resolves to the future (e.g. "12 sentyabrda" said on
+// Sept 19) rolls back to this year instead of forward to next year.
+// Explicit years and already-ISO values are left untouched.
+export function resolveVisitDateField(raw: string, baseIso?: string): string {
+  const text = raw.trim();
+  if (!text) return text;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const resolved = resolveDateString(text, baseIso) ?? text;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(resolved)) return resolved;
+  if (/\b(19|20)\d{2}\b/.test(text)) return resolved;
+  const base = baseIso ?? todayBaku();
+  if (resolved > base) {
+    const [y, m, d] = resolved.split('-').map(Number);
+    const rolled = `${y - 1}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    return rolled;
+  }
+  return resolved;
+}
+
 // Range queries: "sabahdan ...", "bugündən ...", "from tomorrow ...".
 // Returns the inclusive start date (ISO YYYY-MM-DD) with no upper bound,
 // or null when the text carries no from-date intent.
