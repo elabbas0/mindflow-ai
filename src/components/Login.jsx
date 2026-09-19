@@ -1,25 +1,47 @@
-import React from 'react';
+import { useMemo } from 'react';
 import { useGoogleLogin } from '@react-oauth/google';
-import { fetchGoogleProfile, isIosDevice, persistLogin } from '../utils/googleAuth';
+import { createOAuthState, fetchGoogleProfile, isIosDevice, persistLogin } from '../utils/googleAuth';
 
 export default function LoginPage({ onLoginSuccess }) {
-    const login = useGoogleLogin({
-        // Popups escape the app on iOS — redirect back into the app instead.
-        flow: 'implicit',
-        ux_mode: isIosDevice() ? 'redirect' : 'popup',
-        redirect_uri: typeof window !== 'undefined' ? window.location.origin : undefined,
-        onSuccess: async (tokenResponse) => {
-            try {
-                const userInfo = await fetchGoogleProfile(tokenResponse.access_token);
-                persistLogin(userInfo?.email || '', userInfo?.name || '');
-            } catch (e) {
-                console.warn('Could not fetch Google userinfo:', e);
-                persistLogin('', '');
+    const ios = isIosDevice();
+    // CSRF state for the iOS redirect flow (verified when Google returns).
+    const oauthState = useMemo(() => (ios ? createOAuthState() : ''), [ios]);
+    // Pre-select the last used account on the Google chooser.
+    const loginHint = useMemo(() => {
+        try {
+            return localStorage.getItem('mindflow_user_email') || undefined;
+        } catch {
+            return undefined;
+        }
+    }, []);
+
+    const login = useGoogleLogin(
+        ios
+            ? {
+                // iOS standalone PWAs can't do popups (separate sheet, no
+                // shared session): full-page redirect back into the app.
+                // The ?code=... is exchanged server-side (see App.jsx).
+                flow: 'auth-code',
+                ux_mode: 'redirect',
+                redirect_uri: typeof window !== 'undefined' ? window.location.origin : undefined,
+                state: oauthState,
+                ...(loginHint ? { login_hint: loginHint } : {}),
             }
-            if (onLoginSuccess) onLoginSuccess();
-        },
-        onError: () => console.log('Login Failed'),
-    });
+            : {
+                flow: 'implicit',
+                onSuccess: async (tokenResponse) => {
+                    try {
+                        const userInfo = await fetchGoogleProfile(tokenResponse.access_token);
+                        persistLogin(userInfo?.email || '', userInfo?.name || '');
+                    } catch (e) {
+                        console.warn('Could not fetch Google userinfo:', e);
+                        persistLogin('', '');
+                    }
+                    if (onLoginSuccess) onLoginSuccess();
+                },
+                onError: () => console.log('Login Failed'),
+            },
+    );
 
     return (
         <div className="min-h-screen bg-[#FAFAFB] flex flex-col items-center justify-center p-4 font-sans">

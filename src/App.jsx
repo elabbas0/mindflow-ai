@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './Layout';
 import Dashboard from './page/Dashboard';
@@ -12,7 +12,8 @@ import LoadingScreen from './Loadingscreen';
 import LoginPage from './components/Login';
 import Logout from './components/Logout';
 import { UserProvider } from './UserContext';
-import { clearUrlHash, fetchGoogleProfile, getRedirectAccessToken, persistLogin } from './utils/googleAuth';
+import { exchangeGoogleCode } from './services/api';
+import { clearAuthQuery, getAuthCodeReturn, persistLogin } from './utils/googleAuth';
 
 export default function App() {
   const [showLoading, setShowLoading] = useState(true);
@@ -29,21 +30,28 @@ export default function App() {
     setIsAuthenticated(false);
   };
 
-  // iOS redirect-flow return: Google sent us back with #access_token=...
-  // Complete the login here (desktop popup flow never lands here).
+  // iOS auth-code redirect return: Google sent us back with
+  // ?code=...&state=... — exchange it server-side, then sign in.
+  // (Desktop popup flow never lands here.)
   useEffect(() => {
-    const token = getRedirectAccessToken();
-    if (!token) return;
+    const ret = getAuthCodeReturn();
+    if (!ret) return;
+    if (!ret.stateOk) {
+      clearAuthQuery();
+      return;
+    }
     (async () => {
       try {
-        const userInfo = await fetchGoogleProfile(token);
-        persistLogin(userInfo?.email || '', userInfo?.name || '');
-        localStorage.setItem('mindflow_auth', 'true');
-        setIsAuthenticated(true);
+        const data = await exchangeGoogleCode({ code: ret.code, redirectUri: window.location.origin });
+        if (data?.ok && data.profile?.email) {
+          persistLogin(data.profile.email, data.profile.name || '');
+          localStorage.setItem('mindflow_auth', 'true');
+          setIsAuthenticated(true);
+        }
       } catch (e) {
         console.warn('Google redirect login failed:', e);
       } finally {
-        clearUrlHash();
+        clearAuthQuery();
       }
     })();
   }, []);

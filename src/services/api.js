@@ -6,6 +6,13 @@ import axios from 'axios';
 const BASE =
     import.meta.env.VITE_API_URL || 'https://backend-production-4d2a.up.railway.app';
 
+// Exchange a Google OAuth auth-code for the verified profile (used by the
+// iOS redirect login; the client secret stays server-side on the backend).
+export async function exchangeGoogleCode({ code, redirectUri }) {
+    const res = await axios.post(`${BASE}/api/auth/google`, { code, redirectUri });
+    return res.data;
+}
+
 // Fetch user profile by gmail
 export async function getUser(email) {
     const res = await axios.get(`${BASE}/api/users`, { params: { gmail: email } });
