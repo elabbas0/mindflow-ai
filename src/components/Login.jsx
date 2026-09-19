@@ -14,6 +14,12 @@ export default function LoginPage({ onLoginSuccess }) {
                 if (email) {
                     localStorage.setItem('mindflow_user_email', email);
                 }
+                // Full name is used if the web account needs to be created
+                // on first login (backend registers gmail-only signups).
+                const fullName = userInfo.data?.name || '';
+                if (fullName) {
+                    localStorage.setItem('mindflow_user_name', fullName);
+                }
             } catch (e) {
                 console.warn('Could not fetch Google userinfo:', e);
             }

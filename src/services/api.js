@@ -26,6 +26,18 @@ export async function getCategories() {
     return Array.isArray(raw) ? raw : [];
 }
 
+// Register a web/PWA account with gmail only (no Telegram id yet).
+// Idempotent: the same gmail always maps to the same account, which gets
+// a web-provisioned (negative) telegramId from the backend.
+export async function registerUser({ gmail, firstName, lastName }) {
+    const res = await axios.post(`${BASE}/api/users`, {
+        gmail,
+        ...(firstName ? { firstName } : {}),
+        ...(lastName ? { lastName } : {}),
+    });
+    return res.data?.user || null;
+}
+
 // Update user profile by gmail.
 // The backend has no PUT /api/users: profile updates go through
 // POST /api/users, which requires telegramId.

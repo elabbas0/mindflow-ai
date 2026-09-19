@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { getUser, getAllItems, updateUser, updateItem } from './services/api';
+import { getUser, getAllItems, registerUser, updateUser, updateItem } from './services/api';
 
 const UserContext = createContext(null);
 
@@ -18,10 +18,25 @@ export function UserProvider({ children }) {
                 if (!isBackground) setLoading(false);
                 return;
             }
-            let [userData, itemsData] = await Promise.all([
-                getUser(email),
-                getAllItems(email),
-            ]);
+            let userData;
+            let itemsData;
+            try {
+                [userData, itemsData] = await Promise.all([
+                    getUser(email),
+                    getAllItems(email),
+                ]);
+            } catch (err) {
+                // Unknown gmail (never used the bot, never opened the web):
+                // register a web account on the spot so the app works.
+                if (err?.response?.status !== 404) throw err;
+                const parts = (localStorage.getItem('mindflow_user_name') || '').split(' ').filter(Boolean);
+                userData = await registerUser({
+                    gmail: email,
+                    ...(parts[0] ? { firstName: parts[0] } : {}),
+                    ...(parts.length > 1 ? { lastName: parts.slice(1).join(' ') } : {}),
+                });
+                itemsData = [];
+            }
             
             try {
                 const localUserUpdates = JSON.parse(localStorage.getItem('mindflow_user_updates')) || {};
