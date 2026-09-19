@@ -12,6 +12,8 @@ const envSchema = z.object({
   GEMINI_MODEL: z.string().default('gemini-flash-lite-latest'),
   LLM_PROVIDER: z.enum(['gemini', 'stub']).default('gemini'),
   GROQ_API_KEY: z.string().optional(),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
 });

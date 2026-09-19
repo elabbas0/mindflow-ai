@@ -5,6 +5,7 @@ import swaggerUi from '@fastify/swagger-ui';
 import { env } from './config/env.js';
 import { devRoutes } from './dev/dev.routes.js';
 import { assistantRoutes } from './modules/assistant/assistant.routes.js';
+import { googleAuthRoutes } from './modules/auth/google.routes.js';
 import { itemRoutes } from './modules/events/items.routes.js';
 import { eventsRoutes } from './modules/events/events.routes.js';
 import { telegramRoutes } from './modules/telegram/telegram.routes.js';
@@ -41,6 +42,7 @@ export function buildApp(): FastifyInstance {
       },
       tags: [
         { name: 'system', description: 'Health and API docs' },
+        { name: 'auth', description: 'Google OAuth code exchange for the iOS PWA login' },
         { name: 'telegram', description: 'Telegram Bot API webhook (called by Telegram)' },
         { name: 'users', description: 'Accounts linking telegramId and gmail' },
         { name: 'items', description: 'Saved items CRUD + categories (used by the web app)' },
@@ -52,6 +54,7 @@ export function buildApp(): FastifyInstance {
   void app.register(swaggerUi, { routePrefix: '/docs' });
 
   void app.register(healthRoutes);
+  void app.register(googleAuthRoutes);
   void app.register(telegramRoutes);
   void app.register(eventsRoutes);
   void app.register(itemRoutes);
