@@ -3,6 +3,22 @@ import { z } from 'zod';
 import { findUser } from './identify.js';
 import { getUserStore } from './users.repository.js';
 
+/**
+ * Deterministic web-provisioned id for gmail-only signups (web/PWA users
+ * who never touched the Telegram bot). Negative, so it can never collide
+ * with real Telegram user ids (always positive). Same gmail always maps
+ * to the same row, making web registration idempotent.
+ */
+export function webTelegramId(gmail: string): number {
+  let hash = 0x811c9dc5;
+  const s = gmail.trim().toLowerCase();
+  for (let i = 0; i < s.length; i++) {
+    hash ^= s.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return -((hash >>> 0) % 2000000000) - 1;
+}
+
 const userJson = {
   type: 'object',
   properties: {
@@ -45,9 +61,10 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       schema: {
         tags: ['users'],
         summary: 'Get or create an account, optionally attaching gmail/name',
+        description:
+          'Telegram clients pass telegramId. Web/PWA clients without one may register with gmail only and receive a web-provisioned (negative) telegramId.',
         body: {
           type: 'object',
-          required: ['telegramId'],
           properties: {
             telegramId: { type: 'number' },
             gmail: { type: 'string' },
@@ -72,27 +89,32 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const parsed = z
         .object({
-          telegramId: z.number(),
+          telegramId: z.number().optional(),
           gmail: z.string().optional(),
           firstName: z.string().optional(),
           lastName: z.string().optional(),
           lang: z.enum(['az', 'en']).optional(),
         })
         .safeParse(req.body);
-      if (!parsed.success) return reply.code(400).send({ ok: false, error: 'telegramId is required.' });
+      if (!parsed.success || (parsed.data.telegramId === undefined && !parsed.data.gmail)) {
+        return reply.code(400).send({ ok: false, error: 'Provide telegramId or gmail.' });
+      }
+      // Web/PWA signup: no Telegram id yet — derive the stable
+      // web-provisioned one from gmail (always negative, idempotent).
+      const telegramId = parsed.data.telegramId ?? webTelegramId(parsed.data.gmail as string);
       const store = getUserStore();
-      const { user, isNew } = await store.getOrCreate(parsed.data.telegramId);
+      const { user, isNew } = await store.getOrCreate(telegramId);
       let current = user;
       if (parsed.data.gmail && parsed.data.gmail !== current.gmail) {
-        current = await store.setGmail(parsed.data.telegramId, parsed.data.gmail);
+        current = await store.setGmail(telegramId, parsed.data.gmail);
       }
       if (parsed.data.firstName !== undefined || parsed.data.lastName !== undefined) {
         const firstName = parsed.data.firstName ?? current.firstName ?? '';
         const lastName = parsed.data.lastName ?? current.lastName ?? '';
-        if (firstName || lastName) current = await store.setNames(parsed.data.telegramId, firstName, lastName);
+        if (firstName || lastName) current = await store.setNames(telegramId, firstName, lastName);
       }
       if (parsed.data.lang && parsed.data.lang !== current.lang) {
-        current = await store.setLang(parsed.data.telegramId, parsed.data.lang);
+        current = await store.setLang(telegramId, parsed.data.lang);
       }
       return reply.send({ ok: true, user: current, created: isNew });
     },
