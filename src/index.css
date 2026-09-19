@@ -1,1 +1,38 @@
 @import "tailwindcss";
+
+html {
+  /* Prevent iOS Safari auto-zoom on input focus + rubber-banding */
+  overscroll-behavior-y: none;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  /* Fill the notch area; pages add their own safe padding via .px-safe/.pb-safe */
+  background-color: #fafafb;
+}
+
+/* Notch / home-indicator safe-area helpers (iOS + Android gesture bars) */
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.px-safe {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Standalone (installed PWA) tweaks */
+@media (display-mode: standalone) {
+  body {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  input,
+  textarea {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+}

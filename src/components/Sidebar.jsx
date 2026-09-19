@@ -66,7 +66,7 @@ export default function Sidebar() {
     return (
         <>
             {/* Mobil Header və Açma/Bağlama Düyməsi */}
-            <div className="md:hidden flex items-center justify-between bg-white border-b border-gray-100 px-4 py-3 sticky top-0 z-50 w-full">
+            <div className="md:hidden flex items-center justify-between bg-white border-b border-gray-100 px-4 py-3 pt-safe sticky top-0 z-50 w-full">
                 <div
                     onClick={() => navigate('/dashboard')}
                     className="w-20 h-1 cursor-pointer flex items-center overflow-hidden"
