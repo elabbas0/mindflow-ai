@@ -1,29 +1,21 @@
 import React from 'react';
 import { useGoogleLogin } from '@react-oauth/google';
-import axios from 'axios';
+import { fetchGoogleProfile, isIosDevice, persistLogin } from '../utils/googleAuth';
 
 export default function LoginPage({ onLoginSuccess }) {
     const login = useGoogleLogin({
+        // Popups escape the app on iOS — redirect back into the app instead.
+        flow: 'implicit',
+        ux_mode: isIosDevice() ? 'redirect' : 'popup',
+        redirect_uri: typeof window !== 'undefined' ? window.location.origin : undefined,
         onSuccess: async (tokenResponse) => {
             try {
-                const userInfo = await axios.get(
-                    'https://www.googleapis.com/oauth2/v3/userinfo',
-                    { headers: { Authorization: `Bearer ${tokenResponse.access_token}` } }
-                );
-                const email = userInfo.data?.email || '';
-                if (email) {
-                    localStorage.setItem('mindflow_user_email', email);
-                }
-                // Full name is used if the web account needs to be created
-                // on first login (backend registers gmail-only signups).
-                const fullName = userInfo.data?.name || '';
-                if (fullName) {
-                    localStorage.setItem('mindflow_user_name', fullName);
-                }
+                const userInfo = await fetchGoogleProfile(tokenResponse.access_token);
+                persistLogin(userInfo?.email || '', userInfo?.name || '');
             } catch (e) {
                 console.warn('Could not fetch Google userinfo:', e);
+                persistLogin('', '');
             }
-            localStorage.setItem('mindflow_auth', 'true');
             if (onLoginSuccess) onLoginSuccess();
         },
         onError: () => console.log('Login Failed'),
