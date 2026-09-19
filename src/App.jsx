@@ -47,9 +47,19 @@ export default function App() {
           persistLogin(data.profile.email, data.profile.name || '');
           localStorage.setItem('mindflow_auth', 'true');
           setIsAuthenticated(true);
+        } else {
+          throw new Error(data?.error || 'Google sign-in failed.');
         }
       } catch (e) {
         console.warn('Google redirect login failed:', e);
+        try {
+          sessionStorage.setItem(
+            'mindflow_auth_error',
+            e?.response?.data?.error || e?.message || 'Google sign-in failed. Please try again.',
+          );
+        } catch {
+          // ignore
+        }
       } finally {
         clearAuthQuery();
       }

@@ -1,9 +1,26 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useGoogleLogin } from '@react-oauth/google';
 import { createOAuthState, fetchGoogleProfile, isIosDevice, persistLogin } from '../utils/googleAuth';
 
+function useLastAuthError() {
+    const [authError] = useState(() => {
+        try {
+            const msg = sessionStorage.getItem('mindflow_auth_error');
+            if (msg) {
+                sessionStorage.removeItem('mindflow_auth_error');
+                return msg;
+            }
+        } catch {
+            // ignore
+        }
+        return null;
+    });
+    return authError;
+}
+
 export default function LoginPage({ onLoginSuccess }) {
     const ios = isIosDevice();
+    const authError = useLastAuthError();
     // CSRF state for the iOS redirect flow (verified when Google returns).
     const oauthState = useMemo(() => (ios ? createOAuthState() : ''), [ios]);
     // Pre-select the last used account on the Google chooser.
@@ -67,6 +84,12 @@ export default function LoginPage({ onLoginSuccess }) {
                 <p className="text-xs sm:text-sm text-gray-500 leading-relaxed max-w-[320px] mb-8">
                     Sign in to continue to your workspace, tasks, meetings, and calendar.
                 </p>
+
+                {authError && (
+                    <div className="w-full text-xs text-red-600 bg-red-50 border border-red-100 rounded-2xl p-3 mb-4">
+                        {authError}
+                    </div>
+                )}
 
                 {/* Google Sign-In Button */}
                 <button
