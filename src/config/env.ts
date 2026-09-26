@@ -16,6 +16,9 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  SUPABASE_STORAGE_BUCKET: z.string().default('health-files'),
+  FILE_LINK_TTL_SECONDS: z.coerce.number().int().positive().max(604800).default(3600),
+  MAX_FILE_BYTES: z.coerce.number().int().positive().default(15 * 1024 * 1024),
 });
 
 export type Env = z.infer<typeof envSchema>;

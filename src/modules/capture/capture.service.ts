@@ -1,4 +1,7 @@
 import { answerCallbackQuery, sendMessage } from '../../infra/telegram/client.js';
+import { downloadTelegramFile } from '../../infra/telegram/client.js';
+import { isStorageConfigured, uploadBuffer } from '../../infra/storage/files.storage.js';
+import { env } from '../../config/env.js';
 import { getItemStore } from '../events/items.repository.js';
 import { getExtractionProvider } from '../extraction/extraction.provider.js';
 import type { TelegramUpdate } from '../telegram/telegram.schemas.js';
@@ -166,6 +169,8 @@ const STR: Record<'en' | 'az', Record<string, string>> = {
     files_more: 'Want to add another file? Send the file or write "done".',
     file_saved: '✅ File saved.',
     file_skip: 'OK, no files added.',
+    file_uploading: 'Uploading your file…',
+    file_upload_failed: '⚠️ I saved the file reference, but the upload to storage failed. You can send it again.',
   },
   az: {
     greeting: `Salam! Mən MindFlow 🧠\nMənə istənilən şeyi göndərin — tapşırıq, görüş, layihə ideyası, qeyd və ya sağlamlıq qeydi — və mən onu sizin üçün təşkil edim.`,
@@ -197,6 +202,8 @@ const STR: Record<'en' | 'az', Record<string, string>> = {
     files_more: 'Daha fayl əlavə etmək istəyirsiniz? Faylı göndərin və ya \'bitdi\' yazın.',
     file_saved: '✅ Fayl yadda saxlanıldı.',
     file_skip: 'Oldu, fayl əlavə edilmədi.',
+    file_uploading: 'Faylınız yüklənir…',
+    file_upload_failed: '⚠️ Fayl istinadı saxlanıldı, amma yaddaşa yükləmə uğursuz oldu. Yenidən göndərə bilərsiniz.',
   },
 };
 
@@ -271,6 +278,9 @@ export interface HealthFileRef {
   file_id: string;
   file_name?: string;
   mime_type?: string;
+  /** Private Supabase Storage object path (bucket-relative). Present after a real upload. */
+  storage_path?: string;
+  size?: number;
 }
 
 export function parseFiles(raw: string | undefined): HealthFileRef[] {
@@ -291,6 +301,10 @@ export function parseFiles(raw: string | undefined): HealthFileRef[] {
               file_id: rec['file_id'].trim(),
               ...(typeof rec['file_name'] === 'string' ? { file_name: rec['file_name'] } : {}),
               ...(typeof rec['mime_type'] === 'string' ? { mime_type: rec['mime_type'] } : {}),
+              ...(typeof rec['storage_path'] === 'string' && rec['storage_path'].trim()
+                ? { storage_path: rec['storage_path'].trim() }
+                : {}),
+              ...(typeof rec['size'] === 'number' ? { size: rec['size'] } : {}),
             });
           }
         }
@@ -392,7 +406,7 @@ export async function handleCapture(update: TelegramUpdate): Promise<void> {
   }
   if (message.photo && message.photo.length > 0) {
     const best = message.photo[message.photo.length - 1];
-    if (best) incomingFiles.push({ file_id: best.file_id });
+    if (best) incomingFiles.push({ file_id: best.file_id, file_name: `photo_${best.file_id.slice(0, 8)}.jpg`, mime_type: 'image/jpeg' });
   }
   const captionText = (message.caption ?? '').trim();
 
@@ -448,13 +462,59 @@ export async function handleCapture(update: TelegramUpdate): Promise<void> {
   if (incomingFiles.length > 0) await stashIncomingFiles(chatId, incomingFiles);
 }
 
+function defaultFileName(file: HealthFileRef, telegramFilePath?: string): string {
+  if (file.file_name?.trim()) return file.file_name.trim();
+  if (telegramFilePath) {
+    const base = telegramFilePath.split('/').pop();
+    if (base) return base;
+  }
+  return `file_${file.file_id.slice(0, 8)}.bin`;
+}
+
+/**
+ * Real upload: Telegram file_id -> bytes -> private Supabase Storage object.
+ * Returns the same refs enriched with storage_path/size. On any failure
+ * (DEV_MODE mock ids, missing keys, network) the original refs are returned
+ * with `uploadFailed=true` so the caller can warn but still keep the ref.
+ */
+async function uploadIncomingFiles(
+  userId: number,
+  files: HealthFileRef[],
+): Promise<{ uploaded: HealthFileRef[]; uploadFailed: boolean }> {
+  if (!isStorageConfigured() || env.DEV_MODE) return { uploaded: files, uploadFailed: !isStorageConfigured() && !env.DEV_MODE };
+  let failed = false;
+  const out: HealthFileRef[] = [];
+  for (const file of files) {
+    // Already uploaded (retry path) — keep as is.
+    if (file.storage_path) {
+      out.push(file);
+      continue;
+    }
+    try {
+      const { buffer, filePath } = await downloadTelegramFile(file.file_id);
+      const fileName = defaultFileName(file, filePath);
+      const storagePath = await uploadBuffer(buffer, {
+        userId,
+        fileName,
+        contentType: file.mime_type,
+      });
+      out.push({ ...file, file_name: fileName, storage_path: storagePath, size: buffer.length });
+    } catch {
+      failed = true;
+      out.push(file);
+    }
+  }
+  return { uploaded: out, uploadFailed: failed };
+}
+
 async function stashIncomingFiles(chatId: number, files: HealthFileRef[]): Promise<void> {
   const sessions = getSessionStore();
   const session = await sessions.get(chatId);
   if (!session) return;
   if (session.draft.category !== undefined && session.draft.category !== 'health') return;
+  const { uploaded } = await uploadIncomingFiles(session.userId, files);
   const current = parseFiles(session.draft.fields['files']);
-  const merged = [...current, ...files].slice(0, 10);
+  const merged = [...current, ...uploaded].slice(0, 10);
   await sessions.save({
     ...session,
     draft: { ...session.draft, fields: { ...session.draft.fields, files: serializeFiles(merged) } },
@@ -468,14 +528,15 @@ async function handleHealthFileAttach(
   lang: 'az' | 'en',
 ): Promise<void> {
   const sessions = getSessionStore();
+  const { uploaded, uploadFailed } = await uploadIncomingFiles(session.userId, files);
   const current = parseFiles(session.draft.fields['files']);
-  const merged = [...current, ...files].slice(0, 10);
+  const merged = [...current, ...uploaded].slice(0, 10);
   const updated: Session = {
     ...session,
     draft: { ...session.draft, fields: { ...session.draft.fields, files: serializeFiles(merged) } },
   };
   await sessions.save({ ...updated, status: 'awaiting_field', pendingField: 'files' });
-  await sendMessage(chatId, tr(lang, 'file_saved'));
+  await sendMessage(chatId, tr(lang, uploadFailed ? 'file_upload_failed' : 'file_saved'));
   const fresh = await sessions.get(chatId);
   if (fresh) await sendMessage(chatId, tr(lang, 'files_more'));
 }

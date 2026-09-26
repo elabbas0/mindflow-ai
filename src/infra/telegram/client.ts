@@ -43,6 +43,12 @@ export async function answerCallbackQuery(callbackId: string): Promise<void> {
 }
 
 export async function downloadVoiceFile(fileId: string): Promise<Buffer> {
+  const { buffer } = await downloadTelegramFile(fileId);
+  return buffer;
+}
+
+/** Generic Telegram file_id -> bytes. Works for documents, photos, voice, etc. */
+export async function downloadTelegramFile(fileId: string): Promise<{ buffer: Buffer; filePath: string }> {
   const token = requireToken();
   const fileRes = await fetch(`${API}/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`);
   if (!fileRes.ok) throw new Error(`Telegram getFile failed: ${fileRes.status}`);
@@ -52,5 +58,5 @@ export async function downloadVoiceFile(fileId: string): Promise<Buffer> {
 
   const dlRes = await fetch(`${API}/file/bot${token}/${filePath}`);
   if (!dlRes.ok) throw new Error(`Telegram file download failed: ${dlRes.status}`);
-  return Buffer.from(await dlRes.arrayBuffer());
+  return { buffer: Buffer.from(await dlRes.arrayBuffer()), filePath };
 }

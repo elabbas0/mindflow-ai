@@ -1,5 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { env } from '../../config/env.js';
+import {
+  createTempDownloadUrl,
+  isStorageConfigured,
+  removeStorageFile,
+  uploadBuffer,
+} from '../../infra/storage/files.storage.js';
 import { CATEGORIES, CATEGORY_IDS, CATEGORY_REQUIRED, FIELD_LABELS, FIELD_ORDER } from '../capture/category-fields.js';
 import { resolveDateField, resolveVisitDateField } from '../capture/dates.js';
 import { resolveTimeField } from '../capture/times.js';
@@ -10,6 +17,9 @@ export interface ItemFileRef {
   file_id: string;
   file_name?: string;
   mime_type?: string;
+  /** Private Supabase Storage path (bucket-relative). Set after a real upload. */
+  storage_path?: string;
+  size?: number;
 }
 
 export function parseFiles(raw: string | undefined): ItemFileRef[] {
@@ -30,6 +40,10 @@ export function parseFiles(raw: string | undefined): ItemFileRef[] {
               file_id: (rec['file_id'] as string).trim(),
               ...(typeof rec['file_name'] === 'string' ? { file_name: rec['file_name'] } : {}),
               ...(typeof rec['mime_type'] === 'string' ? { mime_type: rec['mime_type'] } : {}),
+              ...(typeof rec['storage_path'] === 'string' && (rec['storage_path'] as string).trim()
+                ? { storage_path: (rec['storage_path'] as string).trim() }
+                : {}),
+              ...(typeof rec['size'] === 'number' ? { size: rec['size'] } : {}),
             });
           }
         }
@@ -68,6 +82,21 @@ function toJson(item: { id: string; category: string; fields: Record<string, str
 async function scopedUser(query: { telegramId?: number; gmail?: string }): Promise<{ telegramId: number } | null> {
   const user = await findUser(query.telegramId, query.gmail);
   return user ? { telegramId: user.telegramId } : null;
+}
+
+function clampExpiry(requested?: number): number {
+  const fallback = env.FILE_LINK_TTL_SECONDS;
+  if (requested === undefined || !Number.isFinite(requested)) return fallback;
+  return Math.min(Math.max(Math.floor(requested), 60), 604800);
+}
+
+async function safeSignedUrl(storagePath: string, expiresIn: number): Promise<string | null> {
+  if (!isStorageConfigured()) return null;
+  try {
+    return await createTempDownloadUrl(storagePath, expiresIn);
+  } catch {
+    return null;
+  }
 }
 
 export async function itemRoutes(app: FastifyInstance): Promise<void> {
@@ -359,6 +388,186 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  app.get(
+    '/api/items/:id/files',
+    {
+      schema: {
+        tags: ['items'],
+        summary: 'List files with temporary download links (owner only, signed URLs)',
+        querystring: {
+          type: 'object',
+          properties: {
+            telegramId: { type: 'number' },
+            gmail: { type: 'string' },
+            expiresIn: { type: 'number' },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const params = req.params as { id: string };
+      const query = req.query as { telegramId?: number; gmail?: string; expiresIn?: number };
+      const scoped = await scopedUser(query);
+      if (!scoped) return reply.code(404).send({ ok: false, error: 'User not found.' });
+      const item = await getItemStore().getById(params.id);
+      if (!item || item.userId !== scoped.telegramId) {
+        return reply.code(404).send({ ok: false, error: 'Item not found.' });
+      }
+      const files = parseFiles(item.fields['files']);
+      const expiresIn = clampExpiry(query.expiresIn);
+      const withUrls = await Promise.all(
+        files.map(async (f, index) => ({
+          index,
+          file_id: f.file_id,
+          file_name: f.file_name,
+          mime_type: f.mime_type,
+          size: f.size,
+          storage_path: f.storage_path,
+          url: f.storage_path ? await safeSignedUrl(f.storage_path, expiresIn) : null,
+        })),
+      );
+      return reply.send({ ok: true, expiresIn, files: withUrls });
+    },
+  );
+
+  app.get(
+    '/api/items/:id/files/:index/url',
+    {
+      schema: {
+        tags: ['items'],
+        summary: 'Get a temporary download link for one file (owner only, signed URL)',
+        querystring: {
+          type: 'object',
+          properties: {
+            telegramId: { type: 'number' },
+            gmail: { type: 'string' },
+            expiresIn: { type: 'number' },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const params = req.params as { id: string; index: string };
+      const query = req.query as { telegramId?: number; gmail?: string; expiresIn?: number };
+      const scoped = await scopedUser(query);
+      if (!scoped) return reply.code(404).send({ ok: false, error: 'User not found.' });
+      const item = await getItemStore().getById(params.id);
+      if (!item || item.userId !== scoped.telegramId) {
+        return reply.code(404).send({ ok: false, error: 'Item not found.' });
+      }
+      const files = parseFiles(item.fields['files']);
+      const idx = Number(params.index);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= files.length) {
+        return reply.code(404).send({ ok: false, error: 'File not found.' });
+      }
+      const file = files[idx];
+      if (!file.storage_path) {
+        return reply.code(410).send({
+          ok: false,
+          error: 'File has no stored object yet (legacy Telegram-only ref). Re-upload it.',
+        });
+      }
+      if (!isStorageConfigured()) {
+        return reply.code(503).send({ ok: false, error: 'File storage is not configured.' });
+      }
+      try {
+        const expiresIn = clampExpiry(query.expiresIn);
+        const url = await createTempDownloadUrl(file.storage_path, expiresIn);
+        return reply.send({
+          ok: true,
+          url,
+          expiresIn,
+          file: { index: idx, file_name: file.file_name, mime_type: file.mime_type, size: file.size },
+        });
+      } catch (err) {
+        req.log.error({ err }, 'Signed URL failed');
+        return reply.code(500).send({ ok: false, error: 'Could not create download link.' });
+      }
+    },
+  );
+
+  app.post(
+    '/api/items/:id/files/upload',
+    {
+      bodyLimit: 22 * 1024 * 1024,
+      schema: {
+        tags: ['items'],
+        summary: 'Upload file bytes (base64) to Supabase Storage and attach to a health record',
+        body: {
+          type: 'object',
+          required: ['fileName', 'dataBase64'],
+          properties: {
+            telegramId: { type: 'number' },
+            gmail: { type: 'string' },
+            fileName: { type: 'string' },
+            mimeType: { type: 'string' },
+            dataBase64: { type: 'string' },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const params = req.params as { id: string };
+      const parsed = z
+        .object({
+          telegramId: z.number().optional(),
+          gmail: z.string().optional(),
+          fileName: z.string().min(1).max(160),
+          mimeType: z.string().max(120).optional(),
+          dataBase64: z.string().min(1),
+        })
+        .safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ ok: false, error: 'fileName and dataBase64 are required.' });
+      const scoped = await scopedUser(parsed.data);
+      if (!scoped) return reply.code(404).send({ ok: false, error: 'User not found.' });
+      if (!isStorageConfigured()) {
+        return reply.code(503).send({ ok: false, error: 'File storage is not configured.' });
+      }
+      const store = getItemStore();
+      const existing = await store.getById(params.id);
+      if (!existing || existing.userId !== scoped.telegramId) {
+        return reply.code(404).send({ ok: false, error: 'Item not found.' });
+      }
+      const files = parseFiles(existing.fields['files']);
+      if (files.length >= 10) {
+        return reply.code(400).send({ ok: false, error: 'File limit reached (max 10).' });
+      }
+      let buffer: Buffer;
+      try {
+        buffer = Buffer.from(parsed.data.dataBase64, 'base64');
+      } catch {
+        return reply.code(400).send({ ok: false, error: 'Invalid base64 data.' });
+      }
+      if (buffer.length === 0) return reply.code(400).send({ ok: false, error: 'Empty file.' });
+      if (buffer.length > env.MAX_FILE_BYTES) {
+        return reply.code(400).send({ ok: false, error: `File too large (max ${env.MAX_FILE_BYTES} bytes).` });
+      }
+      try {
+        const storagePath = await uploadBuffer(buffer, {
+          userId: scoped.telegramId,
+          fileName: parsed.data.fileName,
+          contentType: parsed.data.mimeType,
+        });
+        const ref: ItemFileRef = {
+          file_id: `upload:${storagePath.split('/').pop()}`,
+          file_name: parsed.data.fileName,
+          ...(parsed.data.mimeType ? { mime_type: parsed.data.mimeType } : {}),
+          storage_path: storagePath,
+          size: buffer.length,
+        };
+        files.push(ref);
+        const updated = await store.update(params.id, { fields: { files: serializeFiles(files) } });
+        if (!updated) return reply.code(404).send({ ok: false, error: 'Item not found.' });
+        const expiresIn = clampExpiry(undefined);
+        const url = await safeSignedUrl(storagePath, expiresIn);
+        return reply.send({ ok: true, item: toJson(updated), file: ref, url, expiresIn });
+      } catch (err) {
+        req.log.error({ err }, 'File upload failed');
+        return reply.code(500).send({ ok: false, error: 'File upload failed.' });
+      }
+    },
+  );
+
   app.post(
     '/api/items/:id/files',
     {
@@ -462,7 +671,9 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
       }
       const files = parseFiles(existing.fields['files']);
       let next: ItemFileRef[];
+      let removed: ItemFileRef[];
       if (parsed.data.file_id !== undefined) {
+        removed = files.filter((f) => f.file_id === parsed.data.file_id);
         next = files.filter((f) => f.file_id !== parsed.data.file_id);
         if (next.length === files.length) {
           return reply.code(404).send({ ok: false, error: 'File not found.' });
@@ -472,12 +683,23 @@ export async function itemRoutes(app: FastifyInstance): Promise<void> {
         if (idx < 0 || idx >= files.length) {
           return reply.code(404).send({ ok: false, error: 'File not found.' });
         }
+        removed = [files[idx]];
         next = files.filter((_, i) => i !== idx);
       }
       const updated = await store.update(params.id, {
         fields: { files: next.length > 0 ? serializeFiles(next) : '' },
       });
       if (!updated) return reply.code(404).send({ ok: false, error: 'Item not found.' });
+      // Best-effort: also delete the private storage objects so they stop being downloadable.
+      for (const r of removed) {
+        if (r.storage_path && isStorageConfigured()) {
+          try {
+            await removeStorageFile(r.storage_path);
+          } catch (err) {
+            req.log.warn({ err, storage_path: r.storage_path }, 'Storage object delete failed');
+          }
+        }
+      }
       return reply.send({ ok: true, item: toJson(updated) });
     },
   );
