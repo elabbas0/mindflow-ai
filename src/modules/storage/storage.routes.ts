@@ -18,6 +18,7 @@ export async function storageRoutes(app: FastifyInstance): Promise<void> {
               configured: { type: 'boolean' },
               bucket: { type: 'string' },
               bucketExists: { type: 'boolean' },
+              buckets: { type: 'array', items: { type: 'string' } },
               error: { type: 'string' },
             },
           },
@@ -35,7 +36,7 @@ export async function storageRoutes(app: FastifyInstance): Promise<void> {
         const bucket = storageBucket();
         const names = (data ?? []).map((b) => b.name);
         if (!names.includes(bucket)) {
-          return { ok: false, configured: true, bucket, bucketExists: false, error: `Bucket '${bucket}' not found.` };
+          return { ok: false, configured: true, bucket, bucketExists: false, buckets: names, error: `Bucket '${bucket}' not found.` };
         }
         const { error: listErr } = await supabase.storage.from(bucket).list(undefined, { limit: 1 });
         if (listErr) {
