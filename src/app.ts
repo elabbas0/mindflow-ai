@@ -8,6 +8,7 @@ import { assistantRoutes } from './modules/assistant/assistant.routes.js';
 import { googleAuthRoutes } from './modules/auth/google.routes.js';
 import { itemRoutes } from './modules/events/items.routes.js';
 import { eventsRoutes } from './modules/events/events.routes.js';
+import { storageRoutes } from './modules/storage/storage.routes.js';
 import { telegramRoutes } from './modules/telegram/telegram.routes.js';
 import { userRoutes } from './modules/users/users.routes.js';
 
@@ -54,6 +55,7 @@ export function buildApp(): FastifyInstance {
   void app.register(swaggerUi, { routePrefix: '/docs' });
 
   void app.register(healthRoutes);
+  void app.register(storageRoutes);
   void app.register(googleAuthRoutes);
   void app.register(telegramRoutes);
   void app.register(eventsRoutes);
